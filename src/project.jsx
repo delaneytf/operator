@@ -1203,7 +1203,10 @@ function MeetingRow({ meeting: m, projects, state }) {
   const [editing, setEditing] = React.useState(false);
   const makeDraft = () => ({ title: m.title, date: m.date, attendees: m.attendees || '', notes: m.notes || '', recurrence: m.recurrence || 'none', projectIds: m.projectIds || [] });
   const [draft, setDraft] = React.useState(makeDraft);
-  const [expandedItemId, setExpandedItemId] = React.useState(null);
+  const [expandedTaskId, setExpandedTaskId] = React.useState(null);
+  const [expandedDecId, setExpandedDecId] = React.useState(null);
+  const [editingDecId, setEditingDecId] = React.useState(null);
+  const [editDecDraft, setEditDecDraft] = React.useState(null);
   React.useEffect(() => { if (!editing) setDraft(makeDraft()); }, [m.id, editing]);
 
   const linkedTasks = state ? (state.tasks || []).filter((t) => t.meetingId === m.id) : [];
@@ -1241,10 +1244,10 @@ function MeetingRow({ meeting: m, projects, state }) {
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {linkedTasks.map((t) => {
             const tp = (projects || []).find((p) => p.id === t.projectId);
-            const itemKey = 'task-' + t.id;
-            if (expandedItemId === itemKey) {
+            if (expandedTaskId === t.id) {
               return (
-                <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); setExpandedTaskId(null); }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <PriorityBadge priority={t.priority} />
                     <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{t.title}</span>
@@ -1257,7 +1260,7 @@ function MeetingRow({ meeting: m, projects, state }) {
                   </div>
                   {t.description && <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-line' }}>{t.description}</div>}
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete task?')) { actions.deleteTask(t.id); setExpandedItemId(null); } }}>Delete</button>
+                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete task?')) { actions.deleteTask(t.id); setExpandedTaskId(null); } }}>Delete</button>
                     <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); window.actions.openTask(t.id); }}><Icon name="edit" size={11} /> Edit</button>
                   </div>
                 </div>
@@ -1265,7 +1268,7 @@ function MeetingRow({ meeting: m, projects, state }) {
             }
             return (
               <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 0', cursor: 'pointer' }}
-                onClick={(e) => { e.stopPropagation(); setExpandedItemId(expandedItemId === itemKey ? null : itemKey); }}>
+                onClick={(e) => { e.stopPropagation(); setExpandedTaskId(expandedTaskId === t.id ? null : t.id); }}>
                 <PriorityBadge priority={t.priority} />
                 <span style={{ flex: 1, minWidth: 0 }} className="truncate">{t.title}</span>
                 <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{t.status}</span>
@@ -1274,10 +1277,51 @@ function MeetingRow({ meeting: m, projects, state }) {
             );
           })}
           {linkedDecisions.map((n) => {
-            const itemKey = 'dec-' + n.id;
-            if (expandedItemId === itemKey) {
+            if (editingDecId === n.id && editDecDraft) {
+              const saveDecField = (patch) => setEditDecDraft({ ...editDecDraft, ...patch });
               return (
-                <div key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                <div key={n.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--line)' }} onClick={(e) => e.stopPropagation()}>
+                  <input className="input" style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }} value={editDecDraft.title} autoFocus onChange={(e) => saveDecField({ title: e.target.value })} />
+                  <div className="row-flex" style={{ marginBottom: 10 }}>
+                    <input className="input" type="date" value={editDecDraft.date} onChange={(e) => saveDecField({ date: e.target.value })} style={{ width: 150 }} />
+                    <select className="select" value={editDecDraft.reversibility} onChange={(e) => saveDecField({ reversibility: e.target.value })}>
+                      <option value="reversible">Reversible</option>
+                      <option value="irreversible">Irreversible</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <span className="field-label">Choice / summary</span>
+                    <textarea className="input" rows={2} value={editDecDraft.body} onChange={(e) => saveDecField({ body: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <span className="field-label">Context — what made this necessary</span>
+                    <textarea className="input" rows={3} value={editDecDraft.context} onChange={(e) => saveDecField({ context: e.target.value })} placeholder="What situation forced the decision?" />
+                  </div>
+                  <div className="field">
+                    <span className="field-label">Options considered</span>
+                    <textarea className="input" rows={3} value={editDecDraft.options} onChange={(e) => saveDecField({ options: e.target.value })} placeholder="A) … B) … C) …" />
+                  </div>
+                  <div className="field">
+                    <span className="field-label">Tags</span>
+                    <input className="input" value={editDecDraft.tags} onChange={(e) => saveDecField({ tags: e.target.value })} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 12 }}>
+                    <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete decision?')) { actions.deleteNote(n.id); setEditingDecId(null); setEditDecDraft(null); } }}>
+                      <Icon name="trash" size={11} /> Delete
+                    </button>
+                    <button className="btn btn-sm" onClick={() => { setEditingDecId(null); setEditDecDraft(null); }}>Cancel</button>
+                    <button className="btn btn-primary btn-sm" onClick={() => {
+                      actions.updateNote(n.id, { title: editDecDraft.title, body: editDecDraft.body, context: editDecDraft.context, options: editDecDraft.options, reversibility: editDecDraft.reversibility, date: editDecDraft.date, tags: editDecDraft.tags.split(',').map((t) => t.trim()).filter(Boolean) });
+                      setEditingDecId(null); setEditDecDraft(null); setExpandedDecId(null);
+                    }}>Done</button>
+                  </div>
+                </div>
+              );
+            }
+            if (expandedDecId === n.id) {
+              return (
+                <div key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); setExpandedDecId(null); }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                     {n.reversibility === 'irreversible'
                       ? <span className="pill pill-danger" style={{ fontSize: 9.5, flexShrink: 0 }}>irreversible</span>
@@ -1294,15 +1338,15 @@ function MeetingRow({ meeting: m, projects, state }) {
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete decision?')) { actions.deleteNote(n.id); setExpandedItemId(null); } }}>Delete</button>
-                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); window.actions.setActiveView('decisions'); }}>View in Decisions</button>
+                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete decision?')) { actions.deleteNote(n.id); setExpandedDecId(null); } }}>Delete</button>
+                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setEditDecDraft({ title: n.title, body: n.body || '', context: n.context || '', options: n.options || '', reversibility: n.reversibility || 'reversible', date: n.date || new Date().toISOString().slice(0, 10), tags: (n.tags || []).join(', ') }); setEditingDecId(n.id); }}><Icon name="edit" size={11} /> Edit</button>
                   </div>
                 </div>
               );
             }
             return (
               <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 0', cursor: 'pointer' }}
-                onClick={(e) => { e.stopPropagation(); setExpandedItemId(expandedItemId === itemKey ? null : itemKey); }}>
+                onClick={(e) => { e.stopPropagation(); setExpandedDecId(expandedDecId === n.id ? null : n.id); }}>
                 <span className="pill pill-accent" style={{ fontSize: 9.5, flexShrink: 0 }}>decision</span>
                 <span style={{ flex: 1, minWidth: 0 }} className="truncate">{n.title}</span>
                 <Icon name="chevronD" size={9} style={{ color: 'var(--fg-4)' }} />

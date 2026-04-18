@@ -190,7 +190,7 @@ input, textarea, select {
 .sb-item-icon { display: grid; place-items: center; color: var(--fg-3); width: 16px; }
 .sb-item.active .sb-item-icon { color: var(--accent); }
 .sb-item-label { flex: 1; font-weight: 500; }
-.sb-item-hint { color: var(--fg-4); font-family: var(--font-mono); font-size: 11px; }
+.sb-item-hint { color: var(--fg-4); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
 
 .sb-proj {
   display: flex;
@@ -1475,7 +1475,7 @@ textarea.inline-edit-input {
 .modal-foot { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
 
 /* Sidebar action hint */
-.sb-item-hint-action { background: var(--warn) !important; color: var(--bg) !important; }
+.sb-item-hint-action { background: none !important; color: var(--warn) !important; font-weight: 700 !important; }
 
 /* Topbar search */
 .topbar-search {

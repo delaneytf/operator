@@ -97,7 +97,7 @@ function App() {
         <button className={`sb-item ${state.meta.activeView === 'risks' ? 'active' : ''}`} onClick={() => setView('risks')}>
           <span className="sb-item-icon"><Icon name="warn" /></span>
           <span className="sb-item-label">Risks</span>
-          {critRiskCount > 0 && <span className="sb-item-hint sb-item-hint-action">{critRiskCount}</span>}
+          {(() => { const c = (state.risks || []).filter((r) => r.status !== 'closed').length; return c > 0 ? <span className="sb-item-hint">{c}</span> : null; })()}
         </button>
         <button className={`sb-item ${state.meta.activeView === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>
           <span className="sb-item-icon"><Icon name="bolt" /></span>
