@@ -75,22 +75,42 @@ function App() {
           <span className="sb-item-icon"><Icon name="calendar" /></span>
           <span className="sb-item-label">Calendar</span>
         </button>
+        <button className={`sb-item ${state.meta.activeView === 'meetings' ? 'active' : ''}`} onClick={() => setView('meetings')}>
+          <span className="sb-item-icon"><Icon name="clock" /></span>
+          <span className="sb-item-label">Meetings</span>
+          {(state.meetings || []).length > 0 && <span className="sb-item-hint">{(state.meetings || []).length}</span>}
+        </button>
+        <button className={`sb-item ${state.meta.activeView === 'tasks' ? 'active' : ''}`} onClick={() => setView('tasks')}>
+          <span className="sb-item-icon"><Icon name="check" /></span>
+          <span className="sb-item-label">Tasks</span>
+          {(() => { const c = (state.tasks || []).filter((t) => t.status !== 'done').length; return c > 0 ? <span className="sb-item-hint">{c}</span> : null; })()}
+        </button>
         <button className={`sb-item ${state.meta.activeView === 'decisions' ? 'active' : ''}`} onClick={() => setView('decisions')}>
           <span className="sb-item-icon"><Icon name="note" /></span>
           <span className="sb-item-label">Decisions</span>
+        </button>
+        <button className={`sb-item ${state.meta.activeView === 'questions' ? 'active' : ''}`} onClick={() => setView('questions')}>
+          <span className="sb-item-icon"><Icon name="search" /></span>
+          <span className="sb-item-label">Questions</span>
+          {(() => { const c = (state.notes || []).filter((n) => n.kind === 'question' && !n.resolved).length; return c > 0 ? <span className="sb-item-hint">{c}</span> : null; })()}
+        </button>
+        <button className={`sb-item ${state.meta.activeView === 'risks' ? 'active' : ''}`} onClick={() => setView('risks')}>
+          <span className="sb-item-icon"><Icon name="warn" /></span>
+          <span className="sb-item-label">Risks</span>
+          {critRiskCount > 0 && <span className="sb-item-hint sb-item-hint-action">{critRiskCount}</span>}
         </button>
         <button className={`sb-item ${state.meta.activeView === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>
           <span className="sb-item-icon"><Icon name="bolt" /></span>
           <span className="sb-item-label">Weekly review</span>
         </button>
-        <button className={`sb-item ${state.meta.activeView === 'assistant' ? 'active' : ''}`} onClick={() => setView('assistant')}>
-          <span className="sb-item-icon"><Icon name="target" /></span>
-          <span className="sb-item-label">Assistant</span>
-        </button>
 
         <div className="sb-section" style={{ marginTop: 10 }}>
           <span>Integrations</span>
         </div>
+        <button className={`sb-item ${state.meta.activeView === 'assistant' ? 'active' : ''}`} onClick={() => setView('assistant')}>
+          <span className="sb-item-icon"><Icon name="target" /></span>
+          <span className="sb-item-label">Assistant</span>
+        </button>
         <button className={`sb-item ${state.meta.activeView === 'jira' ? 'active' : ''}`} onClick={() => setView('jira')}>
           <span className="sb-item-icon"><Icon name="grid" /></span>
           <span className="sb-item-label">Jira</span>
@@ -170,10 +190,14 @@ function App() {
         <div className="topbar">
           <div className="topbar-left">
             <div className="crumbs">
-              {state.meta.activeView === 'today' && <strong>Today</strong>}
+              {state.meta.activeView === 'today' && <strong>Today <span style={{ fontWeight: 400, color: 'var(--fg-4)' }}>· {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></strong>}
               {state.meta.activeView === 'portfolio' && <strong>Portfolio</strong>}
               {state.meta.activeView === 'calendar' && <strong>Calendar</strong>}
+              {state.meta.activeView === 'tasks' && <strong>Tasks</strong>}
               {state.meta.activeView === 'decisions' && <strong>Decisions</strong>}
+              {state.meta.activeView === 'questions' && <strong>Questions</strong>}
+              {state.meta.activeView === 'risks' && <strong>Risks</strong>}
+              {state.meta.activeView === 'meetings' && <strong>Meetings</strong>}
               {state.meta.activeView === 'search' && <strong>Search</strong>}
               {state.meta.activeView === 'review' && <strong>Weekly review</strong>}
               {state.meta.activeView === 'assistant' && <strong>Assistant</strong>}
@@ -215,8 +239,12 @@ function App() {
         <div className="content" style={{ fontFamily: "Helvetica" }}>
           {state.meta.activeView === 'today' && <Today state={state} onOpenTask={setTaskModalId} onOpenProject={(id) => setView('project', id)} />}
           {state.meta.activeView === 'portfolio' && <Portfolio state={state} onOpenProject={(id) => setView('project', id)} onOpenTask={setTaskModalId} />}
-          {state.meta.activeView === 'calendar' && <CalendarView state={state} />}
+          {state.meta.activeView === 'calendar' && <CalendarView state={state} onOpenMeeting={(id) => actions.setMeta({ activeView: 'meetings', activeMeetingId: id })} />}
+          {state.meta.activeView === 'tasks' && <TasksView state={state} onOpenTask={setTaskModalId} />}
           {state.meta.activeView === 'decisions' && <DecisionsView state={state} />}
+          {state.meta.activeView === 'questions' && <QuestionsView state={state} />}
+          {state.meta.activeView === 'risks' && <RisksView state={state} />}
+          {state.meta.activeView === 'meetings' && <MeetingsView state={state} onOpenProject={(id) => setView('project', id)} onOpenTask={setTaskModalId} />}
           {state.meta.activeView === 'search' && <SearchView state={state} initialQ={topSearchQ} />}
           {state.meta.activeView === 'review' && <ReviewView state={state} />}
           {state.meta.activeView === 'assistant' && <Assistant state={state} />}

@@ -2,11 +2,38 @@
 
 const { useState: useStateCal, useMemo: useMemoCal, useRef: useRefCal, useEffect: useEffectCal } = React;
 
-function CalendarView({ state }) {
+function expandMeetingInstances(meeting, firstDate, lastDate) {
+  const rec = meeting.recurrence || 'none';
+  if (rec === 'none') {
+    return meeting.date >= firstDate && meeting.date <= lastDate ? [meeting] : [];
+  }
+  const step = (d) => {
+    const n = new Date(d);
+    if (rec === 'weekly') n.setDate(n.getDate() + 7);
+    else if (rec === 'biweekly') n.setDate(n.getDate() + 14);
+    else if (rec === 'monthly') n.setMonth(n.getMonth() + 1);
+    return n;
+  };
+  const base = new Date(meeting.date + 'T00:00:00');
+  const first = new Date(firstDate + 'T00:00:00');
+  const last = new Date(lastDate + 'T00:00:00');
+  if (base > last) return [];
+  // Advance from base to first occurrence on or after the visible window
+  let cur = new Date(base);
+  while (cur < first) cur = step(cur);
+  const results = [];
+  while (cur <= last) {
+    results.push({ ...meeting, date: cur.toISOString().slice(0, 10) });
+    cur = step(cur);
+  }
+  return results;
+}
+
+function CalendarView({ state, onOpenMeeting }) {
   const [range, setRange] = useStateCal(14); // days
   const [anchor, setAnchor] = useStateCal(-3); // days offset from today
   const [filter, setFilter] = useStateCal({ priority: null, projects: null });
-  const [showKinds, setShowKinds] = useStateCal({ tasks: true, milestones: true, reviews: true, reminders: true });
+  const [showKinds, setShowKinds] = useStateCal({ tasks: true, milestones: true, meetings: true, reminders: true });
   const [reminderModal, setReminderModal] = useStateCal(null); // null | { id?, date, title, note }
   const [dayNoteModal, setDayNoteModal] = useStateCal(null); // null | { date, body }
   const [tooltip, setTooltip] = useStateCal(null); // null | { kind, data, x, y }
@@ -93,12 +120,10 @@ function CalendarView({ state }) {
   const laneFor = (proj) => {
     const tasks = state.tasks.filter((t) => t.projectId === proj.id && t.dueDate);
     const milestones = state.milestones.filter((m) => m.projectId === proj.id);
-    const reviews = (state.meetings || []).filter((m) => m.projectId === proj.id);
 
     const items = [];
     if (showKinds.tasks) tasks.forEach((t) => items.push({ kind: 'task', date: t.dueDate, data: t }));
     if (showKinds.milestones) milestones.forEach((m) => items.push({ kind: 'milestone', date: m.date, data: m }));
-    if (showKinds.reviews) reviews.forEach((m) => items.push({ kind: 'review', date: m.date, data: m }));
 
     return items.filter((i) => posFor(i.date) !== null);
   };
@@ -172,7 +197,7 @@ function CalendarView({ state }) {
             ))}
           </div>
           <div className="seg">
-            {['tasks', 'milestones', 'reviews', 'reminders'].map((k) => (
+            {['tasks', 'milestones', 'meetings', 'reminders'].map((k) => (
               <button key={k} className={`seg-btn ${showKinds[k] ? 'active' : ''}`} onClick={() => setShowKinds({ ...showKinds, [k]: !showKinds[k] })}>
                 {k}
               </button>
@@ -283,6 +308,38 @@ function CalendarView({ state }) {
                       onMouseLeave={() => setTooltip(null)}>
                       <Icon name="bell" size={9} />
                       <span className="truncate">{r.title}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Meetings row */}
+          {showKinds.meetings && (state.meetings || []).length > 0 && (
+            <div className="cal-row" style={{ gridTemplateColumns: `180px repeat(${range}, ${DAY_W}px)`, minHeight: 36 }}>
+              <div className="cal-lane-label">
+                <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Meetings</span>
+              </div>
+              <div className="cal-lane-body" style={{ gridColumn: `2 / span ${range}`, position: 'relative', minHeight: 36 }}>
+                <div className="cal-lane-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${range}, ${DAY_W}px)` }}>
+                  {days.map((d, i) => (
+                    <div key={d.date} className={`cal-cell${d.d.getDay()===0||d.d.getDay()===6?' weekend':''}${i===todayIdx?' today':''}`} />
+                  ))}
+                </div>
+                {(state.meetings || []).flatMap((m) =>
+                  expandMeetingInstances(m, days[0].date, days[days.length - 1].date)
+                ).map((m, idx) => {
+                  const left = posFor(m.date);
+                  if (left === null) return null;
+                  const isRecurring = m.recurrence && m.recurrence !== 'none';
+                  return (
+                    <div key={`${m.id}-${m.date}`} className="cal-item cal-meeting" style={{ left: left + 2, top: 4, width: DAY_W - 4, cursor: onOpenMeeting ? 'pointer' : 'default' }}
+                      onMouseEnter={(e) => { const rect = e.currentTarget.getBoundingClientRect(); setTooltip({ kind: 'meeting', data: m, x: rect.left, y: rect.bottom + 6 }); }}
+                      onMouseLeave={() => setTooltip(null)}
+                      onClick={() => onOpenMeeting && onOpenMeeting(m.id)}>
+                      {isRecurring ? <span style={{ opacity: 0.7 }}>↻</span> : <Icon name="clock" size={9} />}
+                      <span className="truncate">{m.title}</span>
                     </div>
                   );
                 })}
@@ -403,7 +460,7 @@ function CalendarView({ state }) {
         <span className="cal-leg-item"><span className="cal-leg-dot p2" /> Medium</span>
         <span className="cal-leg-item"><span className="cal-leg-dot p3" /> Low</span>
         <span className="cal-leg-item"><Icon name="milestone" size={11} /> Milestone</span>
-        <span className="cal-leg-item"><Icon name="bolt" size={10} /> Review</span>
+        <span className="cal-leg-item"><Icon name="clock" size={10} /> Meeting</span>
         <span className="cal-leg-item"><Icon name="bell" size={10} /> Reminder</span>
         <span className="cal-leg-item" style={{ marginLeft: 'auto', color: 'var(--fg-4)' }}>Click a task or project to open · click day note row to write</span>
       </div>
@@ -469,10 +526,12 @@ function CalendarView({ state }) {
               {tooltip.data.note && <div className="cal-tooltip-note">{tooltip.data.note}</div>}
             </>
           )}
-          {tooltip.kind === 'review' && (
+          {tooltip.kind === 'meeting' && (
             <>
-              <div className="cal-tooltip-title"><Icon name="bolt" size={11} /> {tooltip.data.title}</div>
-              {tooltip.data.date && <div className="cal-tooltip-row"><span className="cal-tooltip-label">Date</span><span>{fmtDate(tooltip.data.date)}</span></div>}
+              <div className="cal-tooltip-title"><Icon name="clock" size={11} /> {tooltip.data.title}</div>
+              <div className="cal-tooltip-row"><span className="cal-tooltip-label">Date</span><span>{fmtDate(tooltip.data.date)}</span></div>
+              {tooltip.data.attendees && <div className="cal-tooltip-row"><span className="cal-tooltip-label">With</span><span>{tooltip.data.attendees}</span></div>}
+              {tooltip.data.notes && <div className="cal-tooltip-note">{tooltip.data.notes.slice(0, 120)}{tooltip.data.notes.length > 120 ? '…' : ''}</div>}
             </>
           )}
         </div>

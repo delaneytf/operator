@@ -42,6 +42,9 @@ function Today({ state, onOpenTask, onOpenProject }) {
     return { ...b, issue, task };
   });
 
+  const todayStr = localIso();
+  const todayReminders = (state.reminders || []).filter((r) => r.date === todayStr);
+
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 5) return 'Late night.';
@@ -52,28 +55,44 @@ function Today({ state, onOpenTask, onOpenProject }) {
 
   return (
     <div className="content-narrow">
-      {/* Yesterday recap strip */}
-      {(recap.shipped.length + recap.decisions.length + recap.slipped.length) > 0 && (
-        <div className="yesterday-strip">
-          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Yesterday</span>
-          {recap.shipped.length > 0 && <span><strong>{recap.shipped.length}</strong> shipped</span>}
-          {recap.decisions.length > 0 && <span><strong>{recap.decisions.length}</strong> decisions</span>}
-          {recap.slipped.length > 0 && <span style={{ color: 'var(--warn)' }}><strong>{recap.slipped.length}</strong> slipped</span>}
-          <span style={{ color: 'var(--fg-4)' }}>·</span>
-          <span className="mono" style={{ color: 'var(--fg-4)', fontSize: 11 }}>{fmtDate(recap.date)}</span>
+      {/* Today's reminders */}
+      {todayReminders.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, borderColor: 'oklch(70% 0.18 300 / 0.45)', background: 'oklch(70% 0.18 300 / 0.06)' }}>
+          <div className="card-head">
+            <div className="row-flex" style={{ gap: 8 }}>
+              <Icon name="bell" size={13} style={{ color: 'oklch(45% 0.18 300)' }} />
+              <span className="card-head-title" style={{ color: 'oklch(45% 0.18 300)' }}>
+                {todayReminders.length === 1 ? '1 reminder today' : `${todayReminders.length} reminders today`}
+              </span>
+            </div>
+          </div>
+          <div>
+            {todayReminders.map((r) => (
+              <div key={r.id} className="conflict-row" style={{ cursor: 'default' }}>
+                <div className="conflict-icon" style={{ background: 'oklch(70% 0.18 300 / 0.15)', color: 'oklch(45% 0.18 300)' }}>
+                  <Icon name="bell" size={12} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500 }}>{r.title}</div>
+                  {r.note && <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>{r.note}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       <div className="today-hero">
         <div>
+          {/* Greeting */}
           <div className="today-greeting">{greeting}</div>
-          <div className="today-sub">
+          <div className="today-sub" style={{ marginBottom: 16 }}>
             {overdue.length > 0 ? (
-              <>You have <strong style={{ color: 'var(--danger)' }}>{overdue.length} overdue</strong> and {dueToday.length} due today. Start with the top Critical.</>
+              <>You have <strong style={{ color: 'var(--danger)' }}>{overdue.length} overdue</strong> and {dueToday.length} due today.{recap.slipped.length > 0 && <> <strong style={{ color: 'var(--warn)' }}>{recap.slipped.length} slipped</strong> from yesterday.</>}</>
             ) : dueToday.length > 0 ? (
-              <>{dueToday.length} due today. Nothing overdue — stay on it.</>
+              <>{dueToday.length} due today. Nothing overdue — stay on it.{recap.slipped.length > 0 && <> <strong style={{ color: 'var(--warn)' }}>{recap.slipped.length} slipped</strong> from yesterday.</>}</>
             ) : (
-              <>No overdue work. {soon.length} items due in the next 48 hours.</>
+              <>No overdue work. {soon.length} items due in the next 48 hours.{recap.slipped.length > 0 && <> <strong style={{ color: 'var(--warn)' }}>{recap.slipped.length} slipped</strong> from yesterday.</>}</>
             )}
           </div>
           <div className="today-metrics">

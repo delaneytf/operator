@@ -56,6 +56,13 @@ async function loadFromServer() {
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.version) return;
+    if (data.version !== window.SEED.version) {
+      STATE = structuredClone(window.SEED);
+      saveState(STATE);
+      subscribers.forEach((fn) => fn());
+      console.log('[store] server data version mismatch — reseeded');
+      return;
+    }
     STATE = migratePriorities(data);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch {}
     subscribers.forEach((fn) => fn());
@@ -190,6 +197,7 @@ const actions = {
       milestones: s.milestones.filter((m) => m.projectId !== id),
       notes: s.notes.filter((n) => n.projectId !== id),
       risks: s.risks.filter((r) => r.projectId !== id),
+      meetings: (s.meetings || []).map((m) => ({ ...m, projectIds: (m.projectIds || []).filter((pid) => pid !== id) })),
     }));
   },
 
@@ -248,6 +256,18 @@ const actions = {
   },
   deleteRisk(id) {
     setState((s) => ({ ...s, risks: s.risks.filter((r) => r.id !== id) }));
+  },
+
+  // Meetings
+  addMeeting(m) {
+    const meeting = { id: uid('mt'), createdAt: todayStr(), attendees: '', notes: '', ...m };
+    setState((s) => ({ ...s, meetings: [meeting, ...(s.meetings || [])] }));
+  },
+  updateMeeting(id, patch) {
+    setState((s) => ({ ...s, meetings: (s.meetings || []).map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+  },
+  deleteMeeting(id) {
+    setState((s) => ({ ...s, meetings: (s.meetings || []).filter((m) => m.id !== id) }));
   },
 
   // Blockers

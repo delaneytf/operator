@@ -9,7 +9,7 @@ const d = (offset) => {
 };
 
 const SEED = {
-  version: 6,
+  version: 8,
   meta: {
     theme: 'dark',
     density: 'compact',
@@ -299,6 +299,39 @@ const SEED = {
       body: `# Vendor Consolidation\n\n**Decision:** consolidate on Ramp (expenses) + Attio (CRM). Drop Brex, HubSpot, Airtable.\n**Savings:** ~$410/mo.\n**Migration:** blocked — vendor silent on redlines (9 days).` },
     { id: 'cp-10', spaceId: 'cs-prod', title: 'Fundraise narrative (Helios)', author: 'You', updated: d(-7), tags: ['helios','fundraise'],
       body: `# Helios narrative\n\n## One-liner\nAtlas keeps work connected across the tools operators already use.\n\n## Why now\n- Tool sprawl peaking\n- AI enables a new operating layer\n\n## Ask\n$2.5M bridge, 18-month runway, close by July.` },
+  ],
+
+  meetings: [
+    {
+      id: 'mt-1',
+      projectIds: ['p-atlas'],
+      title: 'Atlas sprint planning',
+      date: d(-2),
+      attendees: 'Dev Bhatt, Sara Kim, You',
+      recurrence: 'weekly',
+      notes: 'Agreed to push ATL-412 hero copy rewrite to top of queue. Dev flagged the analytics rollback risk — will monitor for 48h before reverting. Sara to unblock design assets by EOD Thursday.',
+      createdAt: d(-2),
+    },
+    {
+      id: 'mt-2',
+      projectIds: ['p-helios'],
+      title: 'Investor call — Sequoia',
+      date: d(1),
+      attendees: 'Marcus Lee (Sequoia), You',
+      recurrence: 'none',
+      notes: 'Intro call. Send deck and financial model beforehand. Key question expected: why now, why us on distribution. Prep 3-slide narrative arc.',
+      createdAt: d(-1),
+    },
+    {
+      id: 'mt-3',
+      projectIds: ['p-orbit', 'p-atlas'],
+      title: 'Research sync',
+      date: d(-7),
+      attendees: 'Priya Nair, You',
+      recurrence: 'biweekly',
+      notes: 'Walk through coded themes from 14 interviews. Align on top 3 insight clusters before writing synthesis outline. Priya to bring her affinity map.',
+      createdAt: d(-7),
+    },
   ],
 
   // Chat threads

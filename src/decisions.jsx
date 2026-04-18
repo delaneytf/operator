@@ -27,50 +27,57 @@ function DecisionsView({ state }) {
 
   const selected = state.notes.find((n) => n.id === openId);
 
+  const newDecision = () => {
+    const newId = `n-dec-${Date.now()}`;
+    actions.addNote({ id: newId, projectId: filterProject !== 'all' ? filterProject : state.projects[0].id, kind: 'decision', title: 'New decision', body: '', date: today0().toISOString().slice(0, 10), tags: [], context: '', options: '', reversibility: 'reversible' });
+    setOpenId(newId);
+    setEditing(true);
+  };
+
   return (
-    <div className="decisions-wrap">
-      <div className="page-hd">
-        <div>
-          <div className="page-title">Decisions</div>
-          <div className="page-sub">{all.length} logged · context, options considered, choice, reversibility</div>
-        </div>
-        <div className="row-flex">
-          <select className="select" value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
-            <option value="all">All projects</option>
-            {state.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name.split('—')[1]?.trim() || p.name}</option>)}
-          </select>
-          <input className="input" placeholder="Search decisions…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
-          <button className="btn btn-primary btn-sm" onClick={() => {
-            const newId = `n-dec-${Date.now()}`;
-            actions.addNote({ id: newId, projectId: filterProject !== 'all' ? filterProject : state.projects[0].id, kind: 'decision', title: 'New decision', body: '', date: today0().toISOString().slice(0, 10), tags: [], context: '', options: '', reversibility: 'reversible' });
-            setOpenId(newId);
-            setEditing(true);
-          }}>
+    <div className="content-narrow decisions-wrap" style={{ maxWidth: 1280 }}>
+      <div style={{ marginBottom: 14 }}>
+        <div className="row-flex-sb" style={{ alignItems: 'flex-end' }}>
+          <div>
+            <div className="title-h1">Decisions</div>
+            <div className="title-sub">{all.length} logged · context, options considered, choice, reversibility</div>
+          </div>
+          <button className="btn btn-primary" onClick={newDecision}>
             <Icon name="plus" size={11} /> Log decision
           </button>
         </div>
       </div>
 
       <div className="decisions-split">
-        <div className="decisions-list">
-          {pinned.length > 0 && (
-            <>
-              <div className="dec-section-hd"><Icon name="pin" size={11} /> Pinned</div>
-              {pinned.map((n) => <DecisionCard key={n.id} note={n} project={state.projects.find((p) => p.id === n.projectId)} onOpen={() => { setOpenId(n.id); setEditing(false); }} active={openId === n.id} />)}
-            </>
-          )}
-          {Object.keys(grouped).map((quarter) => (
-            <div key={quarter}>
-              <div className="dec-section-hd">{quarter}</div>
-              {grouped[quarter].map((n) => <DecisionCard key={n.id} note={n} project={state.projects.find((p) => p.id === n.projectId)} onOpen={() => { setOpenId(n.id); setEditing(false); }} active={openId === n.id} />)}
-            </div>
-          ))}
-          {all.length === 0 && (
-            <div className="empty">No decisions match.</div>
-          )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+          <input className="input" placeholder="Search decisions…" value={q} onChange={(e) => setQ(e.target.value)} style={{ fontSize: 12 }} />
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All</button>
+            {state.projects.map((p) => (
+              <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
+                onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
+                {p.code}
+              </button>
+            ))}
+          </div>
+          <div className="decisions-list card" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            {pinned.length > 0 && (
+              <>
+                <div className="dec-section-hd"><Icon name="pin" size={11} /> Pinned</div>
+                {pinned.map((n) => <DecisionCard key={n.id} note={n} project={state.projects.find((p) => p.id === n.projectId)} onOpen={() => { setOpenId(n.id); setEditing(false); }} active={openId === n.id} />)}
+              </>
+            )}
+            {Object.keys(grouped).map((quarter) => (
+              <div key={quarter}>
+                <div className="dec-section-hd">{quarter}</div>
+                {grouped[quarter].map((n) => <DecisionCard key={n.id} note={n} project={state.projects.find((p) => p.id === n.projectId)} onOpen={() => { setOpenId(n.id); setEditing(false); }} active={openId === n.id} />)}
+              </div>
+            ))}
+            {all.length === 0 && <div className="empty">No decisions match.</div>}
+          </div>
         </div>
 
-        <div className="decisions-detail">
+        <div className="card" style={{ overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {!selected ? (
             <div className="empty-pane">
               <div style={{ fontSize: 13, marginBottom: 6 }}>Select a decision to see context, options, and reversibility.</div>
@@ -115,7 +122,7 @@ function DecisionDetail({ note, project, editing, setEditing }) {
 
   if (editing) {
     return (
-      <div className="dec-detail">
+      <div className="dec-detail" style={{ overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
         <input className="input" style={{ fontSize: 18, fontWeight: 600, marginBottom: 10 }} value={local.title} onChange={(e) => save({ title: e.target.value })} />
         <div className="row-flex" style={{ marginBottom: 10 }}>
           <ProjectChip project={project} />
@@ -155,7 +162,7 @@ function DecisionDetail({ note, project, editing, setEditing }) {
   }
 
   return (
-    <div className="dec-detail">
+    <div className="dec-detail" style={{ overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
       <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
         <div className="row-flex">
           <ProjectChip project={project} />

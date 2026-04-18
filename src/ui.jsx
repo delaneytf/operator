@@ -32,9 +32,9 @@ const fmtRelative = (s) => {
   if (diff === 1) return 'tomorrow';
   if (diff === -1) return 'yesterday';
   if (diff > 0 && diff < 7) return `in ${diff}d`;
-  if (diff < 0 && diff > -7) return `${Math.abs(diff)}d ago`;
+  if (diff < 0 && diff > -7) return `${Math.abs(diff)}d overdue`;
   if (diff >= 7 && diff < 30) return `in ${Math.round(diff / 7)}w`;
-  if (diff <= -7 && diff > -30) return `${Math.round(Math.abs(diff) / 7)}w ago`;
+  if (diff <= -7 && diff > -30) return `${Math.round(Math.abs(diff) / 7)}w overdue`;
   return fmtDate(s);
 };
 

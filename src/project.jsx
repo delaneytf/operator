@@ -1,17 +1,91 @@
 // Project workspace — objective, milestones, tasks, notes, risks.
 
+function ProjectTaskAddForm({ project, onDone }) {
+  const successCriteria = project.successCriteria || [];
+  const emptyDraft = { title: '', status: 'todo', priority: 'medium', dueDate: '', estimate: '', objectiveId: '', description: '', source: 'planned' };
+  const [draft, setDraft] = React.useState(emptyDraft);
+
+  return (
+    <div style={{ padding: 14, borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
+      <input className="input" style={{ marginBottom: 10, fontWeight: 600 }} value={draft.title} autoFocus
+        onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Task title" />
+      <div className="row-2">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Status</span>
+          <select className="select" value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
+            <option value="todo">Todo</option>
+            <option value="in-progress">Doing</option>
+            <option value="blocked">Blocked</option>
+          </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Priority</span>
+          <select className="select" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Due date</span>
+          <input className="input" type="date" value={draft.dueDate || ''} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value || null })} />
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Estimate (hrs)</span>
+          <input className="input" type="number" min="0" step="0.5" value={draft.estimate || ''} onChange={(e) => setDraft({ ...draft, estimate: parseFloat(e.target.value) || 0 })} />
+        </div>
+      </div>
+      {successCriteria.length > 0 && (
+        <div className="field">
+          <span className="field-label">Linked objective</span>
+          <select className="select" value={draft.objectiveId || ''} onChange={(e) => setDraft({ ...draft, objectiveId: e.target.value })}>
+            <option value="">— none —</option>
+            {successCriteria.map((sc) => <option key={sc.id} value={sc.id}>{sc.text}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="field">
+        <span className="field-label">Description</span>
+        <textarea className="textarea" rows={2} value={draft.description || ''} onChange={(e) => setDraft({ ...draft, description: e.target.value || null })} placeholder="Context, acceptance criteria, links, or notes…" />
+      </div>
+      <div className="field">
+        <span className="field-label">Source</span>
+        <div className="seg">
+          {['planned', 'reactive'].map((s) => (
+            <button key={s} type="button" className={`seg-btn ${draft.source === s ? 'active' : ''}`} onClick={() => setDraft({ ...draft, source: s })}>{s}</button>
+          ))}
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onDone}>Cancel</button>
+        <button className="btn btn-primary" disabled={!draft.title} onClick={() => {
+          actions.addTask({
+            projectId: project.id, title: draft.title, status: draft.status, priority: draft.priority,
+            dueDate: draft.dueDate || null, estimate: parseFloat(draft.estimate) || 1,
+            objectiveId: draft.objectiveId || null, description: draft.description || null, source: draft.source,
+          });
+          onDone();
+        }}>Add task</button>
+      </div>
+    </div>
+  );
+}
+
 function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const project = state.projects.find((p) => p.id === projectId);
   const [tab, setTab] = React.useState('overview');
-  const [showAdd, setShowAdd] = React.useState(false);
+  const [addingTask, setAddingTask] = React.useState(false);
 
   if (!project) return <EmptyState title="Project not found" />;
 
   const tasks = state.tasks.filter((t) => t.projectId === projectId);
   const openTasks = tasks.filter((t) => t.status !== 'done');
   const milestones = state.milestones.filter((m) => m.projectId === projectId).sort((a, b) => a.date.localeCompare(b.date));
-  const notes = state.notes.filter((n) => n.projectId === projectId);
+  const notes = state.notes.filter((n) => n.projectId === projectId && n.kind !== 'artifact');
+  const artifacts = state.notes.filter((n) => n.projectId === projectId && n.kind === 'artifact');
   const risks = state.risks.filter((r) => r.projectId === projectId);
+  const meetings = (state.meetings || []).filter((m) => (m.projectIds || []).includes(projectId)).sort((a, b) => b.date.localeCompare(a.date));
   const prog = projectProgress(state, projectId);
   const risk = projectRiskScore(state, projectId);
 
@@ -20,7 +94,9 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
     { id: 'tasks', label: 'Tasks', icon: 'list', count: openTasks.length },
     { id: 'milestones', label: 'Milestones', icon: 'flag', count: milestones.filter((m) => m.status !== 'done').length },
     { id: 'notes', label: 'Notes', icon: 'note', count: notes.length },
+    { id: 'artifacts', label: 'Artifacts', icon: 'link', count: artifacts.length },
     { id: 'risks', label: 'Risks', icon: 'warn', count: risks.filter((r) => r.status !== 'closed').length },
+    { id: 'meetings', label: 'Meetings', icon: 'clock', count: meetings.length },
   ];
 
   return (
@@ -121,17 +197,10 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
         <div className="card">
           <div className="card-head">
             <span className="card-head-title">Tasks · drag to reorder within priority</span>
-            <button className="btn btn-sm btn-primary" onClick={() => setShowAdd(true)}><Icon name="plus" size={11} /> New task</button>
+            <button className="btn btn-sm btn-primary" onClick={() => setAddingTask(true)}><Icon name="plus" size={11} /> New task</button>
           </div>
-          {showAdd && (
-            <QuickAddTask
-              projectId={project.id}
-              projects={[project]}
-              onAdd={(t) => actions.addTask({ ...t, projectId: project.id })}
-              onCancel={() => setShowAdd(false)}
-            />
-          )}
-          {tasks.length === 0 ? (
+          {addingTask && <ProjectTaskAddForm project={project} onDone={() => setAddingTask(false)} />}
+          {tasks.length === 0 && !addingTask ? (
             <EmptyState title="No tasks yet" body="Add the first task to start executing." icon="plus" />
           ) : (
             <TaskGroupedList
@@ -146,7 +215,9 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
       )}
       {tab === 'milestones' && <MilestonesTab project={project} milestones={milestones} />}
       {tab === 'notes' && <NotesTab project={project} notes={notes} />}
+      {tab === 'artifacts' && <ArtifactsTab project={project} artifacts={artifacts} state={state} />}
       {tab === 'risks' && <RisksTab project={project} risks={risks} />}
+      {tab === 'meetings' && <MeetingsTab project={project} meetings={meetings} state={state} />}
     </div>
   );
 }
@@ -156,8 +227,13 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
   const openTasks = tasks.filter((t) => t.status !== 'done');
   const doneTasks = tasks.filter((t) => t.status === 'done');
   const topTasks = [...openTasks].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || (a.rank || 99) - (b.rank || 99)).slice(0, 5);
-  const recentNotes = state.notes.filter((n) => n.projectId === project.id).slice(0, 3);
+  const recentNotes = state.notes.filter((n) => n.projectId === project.id && n.kind !== 'artifact').slice(0, 3);
   const openRisks = state.risks.filter((r) => r.projectId === project.id && r.status !== 'closed').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
+  const today = new Date().toISOString().slice(0, 10);
+  const upcomingMeetings = (state.meetings || [])
+    .filter((m) => (m.projectIds || []).includes(project.id) && m.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 4);
 
   // Early/late stats
   const timedTasks = doneTasks.filter((t) => t.daysEarlyLate != null);
@@ -251,6 +327,42 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Upcoming meetings */}
+      {upcomingMeetings.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <span className="card-head-title">Upcoming meetings</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => onGoto('meetings')}>View all</button>
+          </div>
+          {upcomingMeetings.map((m) => {
+            const recLabel = m.recurrence && m.recurrence !== 'none' ? RECURRENCE_LABELS[m.recurrence] : null;
+            const linkedTaskCount = (state.tasks || []).filter((t) => t.meetingId === m.id).length;
+            const linkedDecCount = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision').length;
+            return (
+              <div key={m.id} className="ms-compact-row" style={{ cursor: 'default' }}>
+                <Icon name="clock" size={12} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13 }} className="truncate">{m.title}</div>
+                  {m.attendees && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 2 }}>{m.attendees}</div>}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                  <div className="row-flex" style={{ gap: 6 }}>
+                    {recLabel && <span className="pill" style={{ fontSize: 9.5, padding: '1px 5px' }}>↻ {recLabel}</span>}
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>{fmtDate(m.date)}</span>
+                  </div>
+                  {(linkedTaskCount > 0 || linkedDecCount > 0) && (
+                    <div className="row-flex" style={{ gap: 6 }}>
+                      {linkedTaskCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedTaskCount} task{linkedTaskCount > 1 ? 's' : ''}</span>}
+                      {linkedDecCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedDecCount} decision{linkedDecCount > 1 ? 's' : ''}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -526,13 +638,17 @@ function MilestonesTab({ project, milestones }) {
 }
 
 function NoteRow({ note }) {
-  const kindTone = { decision: 'accent', question: 'warn', artifact: 'info', note: 'neutral' }[note.kind] || 'neutral';
+  const isQuestion = note.kind === 'question';
+  const kindTone = { decision: 'accent', question: note.resolved ? 'ok' : 'warn', note: 'neutral' }[note.kind] || 'neutral';
   const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState({ kind: note.kind, title: note.title, body: note.body || '', tags: (note.tags || []).join(', ') });
+  const [resolving, setResolving] = React.useState(false);
+  const [resolutionText, setResolutionText] = React.useState('');
+  const noteToDraft = (n) => ({ kind: n.kind, title: n.title, body: n.body || '', context: n.context || '', options: n.options || '', reversibility: n.reversibility || 'reversible', resolution: n.resolution || '', resolved: !!n.resolved, tags: (n.tags || []).join(', ') });
+  const [draft, setDraft] = React.useState(() => noteToDraft(note));
 
   React.useEffect(() => {
-    if (!editing) setDraft({ kind: note.kind, title: note.title, body: note.body || '', tags: (note.tags || []).join(', ') });
-  }, [note.id, note.title, note.body, editing]);
+    if (!editing) setDraft(noteToDraft(note));
+  }, [note.id, note.title, note.body, note.resolved, editing]);
 
   if (editing) {
     return (
@@ -540,7 +656,7 @@ function NoteRow({ note }) {
         <div className="field">
           <span className="field-label">Kind</span>
           <div className="seg">
-            {['note', 'decision', 'question', 'artifact'].map((k) => (
+            {['note', 'decision', 'question'].map((k) => (
               <button key={k} className={`seg-btn ${draft.kind === k ? 'active' : ''}`} onClick={() => setDraft({ ...draft, kind: k })}>{k}</button>
             ))}
           </div>
@@ -549,10 +665,45 @@ function NoteRow({ note }) {
           <span className="field-label">Title</span>
           <input className="input" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} autoFocus />
         </div>
+        {draft.kind === 'decision' && (
+          <div className="field">
+            <span className="field-label">Reversibility</span>
+            <select className="select" value={draft.reversibility} onChange={(e) => setDraft({ ...draft, reversibility: e.target.value })}>
+              <option value="reversible">Reversible</option>
+              <option value="irreversible">Irreversible</option>
+            </select>
+          </div>
+        )}
         <div className="field">
-          <span className="field-label">Body</span>
+          <span className="field-label">{draft.kind === 'decision' ? 'Choice / summary' : 'Body'}</span>
           <textarea className="textarea" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
         </div>
+        {draft.kind === 'decision' && (
+          <>
+            <div className="field">
+              <span className="field-label">Context — what made this necessary</span>
+              <textarea className="input" rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="What situation forced the decision?" />
+            </div>
+            <div className="field">
+              <span className="field-label">Options considered</span>
+              <textarea className="input" rows={2} value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="A) … B) … C) …" />
+            </div>
+          </>
+        )}
+        {draft.kind === 'question' && (
+          <>
+            <div className="field">
+              <span className="field-label">Resolution</span>
+              <textarea className="input" rows={2} value={draft.resolution} onChange={(e) => setDraft({ ...draft, resolution: e.target.value })} placeholder="How was this resolved?" />
+            </div>
+            <div className="field">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
+                <input type="checkbox" checked={draft.resolved} onChange={(e) => setDraft({ ...draft, resolved: e.target.checked })} />
+                Mark as resolved
+              </label>
+            </div>
+          </>
+        )}
         <div className="field">
           <span className="field-label">Tags (comma-separated)</span>
           <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
@@ -566,9 +717,9 @@ function NoteRow({ note }) {
           <button className="btn btn-primary" onClick={() => {
             if (!draft.title) return;
             actions.updateNote(note.id, {
-              kind: draft.kind,
-              title: draft.title,
-              body: draft.body,
+              kind: draft.kind, title: draft.title, body: draft.body,
+              context: draft.context, options: draft.options, reversibility: draft.reversibility,
+              resolution: draft.resolution, resolved: draft.resolved,
               tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean),
             });
             setEditing(false);
@@ -578,15 +729,53 @@ function NoteRow({ note }) {
     );
   }
 
+  if (resolving) {
+    return (
+      <div className="note-card note-card-editing" onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 10 }}>{note.title}</div>
+        <div className="field">
+          <span className="field-label">Resolution</span>
+          <textarea className="input" rows={3} autoFocus value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder="How was this resolved?" />
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn-sm" onClick={() => { setResolving(false); setResolutionText(''); }}>Cancel</button>
+          <button className="btn btn-primary btn-sm" onClick={() => {
+            actions.updateNote(note.id, { resolved: true, resolution: resolutionText });
+            setResolving(false);
+            setResolutionText('');
+          }}>Mark resolved</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="note-card note-card-hoverable" onClick={() => setEditing(true)}>
       <div className="note-head">
-        <Pill tone={kindTone}>{note.kind}</Pill>
+        <Pill tone={kindTone}>{isQuestion && note.resolved ? 'resolved' : note.kind}</Pill>
         <span className="note-title">{note.title}</span>
         <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{fmtDate(note.date)}</span>
+        {isQuestion && !note.resolved && (
+          <button className="btn btn-ghost btn-sm" style={{ padding: '2px 7px', fontSize: 11 }}
+            onClick={(e) => { e.stopPropagation(); setResolving(true); }}>
+            Resolve
+          </button>
+        )}
+        {isQuestion && note.resolved && (
+          <button className="btn btn-ghost btn-sm" style={{ padding: '2px 7px', fontSize: 11 }}
+            onClick={(e) => { e.stopPropagation(); actions.updateNote(note.id, { resolved: false, resolution: '' }); }}>
+            Re-open
+          </button>
+        )}
         <Icon name="edit" size={11} className="note-edit-icon" />
       </div>
       {note.body && <div className="note-body">{note.body}</div>}
+      {isQuestion && note.resolved && note.resolution && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginRight: 6 }}>Resolution</span>
+          {note.resolution}
+        </div>
+      )}
       {note.tags?.length > 0 && (
         <div className="note-tags">
           {note.tags.map((t) => <span key={t} className="tag">#{t}</span>)}
@@ -599,7 +788,8 @@ function NoteRow({ note }) {
 function NotesTab({ project, notes }) {
   const [kind, setKind] = React.useState('all');
   const [adding, setAdding] = React.useState(false);
-  const [draft, setDraft] = React.useState({ kind: 'note', title: '', body: '', tags: '' });
+  const emptyDraft = { kind: 'note', title: '', body: '', context: '', options: '', reversibility: 'reversible', tags: '' };
+  const [draft, setDraft] = React.useState(emptyDraft);
 
   const filtered = kind === 'all' ? notes : notes.filter((n) => n.kind === kind);
 
@@ -607,7 +797,7 @@ function NotesTab({ project, notes }) {
     <div className="card">
       <div className="card-head">
         <div className="seg" style={{ width: 'auto' }}>
-          {['all', 'note', 'decision', 'question', 'artifact'].map((k) => (
+          {['all', 'note', 'decision', 'question'].map((k) => (
             <button key={k} className={`seg-btn ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>
               {k} {k !== 'all' && <span style={{ color: 'var(--fg-4)', marginLeft: 4 }}>{notes.filter((n) => n.kind === k).length}</span>}
             </button>
@@ -620,42 +810,61 @@ function NotesTab({ project, notes }) {
           <div className="field">
             <span className="field-label">Kind</span>
             <div className="seg">
-              {['note', 'decision', 'question', 'artifact'].map((k) => (
+              {['note', 'decision', 'question'].map((k) => (
                 <button key={k} className={`seg-btn ${draft.kind === k ? 'active' : ''}`} onClick={() => setDraft({ ...draft, kind: k })}>{k}</button>
               ))}
             </div>
           </div>
           <div className="field">
             <span className="field-label">Title</span>
-            <input className="input" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+            <input className="input" value={draft.title} autoFocus onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
           </div>
+          {draft.kind === 'decision' && (
+            <div className="field">
+              <span className="field-label">Reversibility</span>
+              <select className="select" value={draft.reversibility} onChange={(e) => setDraft({ ...draft, reversibility: e.target.value })}>
+                <option value="reversible">Reversible</option>
+                <option value="irreversible">Irreversible</option>
+              </select>
+            </div>
+          )}
           <div className="field">
-            <span className="field-label">Body</span>
+            <span className="field-label">{draft.kind === 'decision' ? 'Choice / summary' : 'Body'}</span>
             <textarea className="textarea" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
           </div>
+          {draft.kind === 'decision' && (
+            <>
+              <div className="field">
+                <span className="field-label">Context — what made this necessary</span>
+                <textarea className="input" rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="What situation forced the decision?" />
+              </div>
+              <div className="field">
+                <span className="field-label">Options considered</span>
+                <textarea className="input" rows={2} value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="A) … B) … C) …" />
+              </div>
+            </>
+          )}
           <div className="field">
             <span className="field-label">Tags (comma-separated)</span>
             <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
           </div>
           <div className="modal-foot">
-            <button className="btn" onClick={() => setAdding(false)}>Cancel</button>
+            <button className="btn" onClick={() => { setDraft(emptyDraft); setAdding(false); }}>Cancel</button>
             <button className="btn btn-primary" onClick={() => {
               if (!draft.title) return;
               actions.addNote({
-                projectId: project.id,
-                kind: draft.kind,
-                title: draft.title,
-                body: draft.body,
+                projectId: project.id, kind: draft.kind, title: draft.title, body: draft.body,
+                context: draft.context, options: draft.options, reversibility: draft.reversibility,
                 tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean),
               });
-              setDraft({ kind: 'note', title: '', body: '', tags: '' });
+              setDraft(emptyDraft);
               setAdding(false);
             }}>Add</button>
           </div>
         </div>
       )}
       {filtered.length === 0 ? (
-        <EmptyState title="No notes" body="Capture general notes, decisions, open questions, and artifact links as you go." icon="note" />
+        <EmptyState title="No notes" body="Capture general notes, decisions, and open questions here." icon="note" />
       ) : filtered.map((n) => <NoteRow key={n.id} note={n} />)}
     </div>
   );
@@ -773,4 +982,368 @@ function RisksTab({ project, risks }) {
   );
 }
 
-Object.assign(window, { ProjectView });
+function ArtifactRow({ artifact, projects }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState({ title: artifact.title, url: artifact.url || '', description: artifact.body || '', artifactType: artifact.artifactType || 'link', tags: (artifact.tags || []).join(', ') });
+  React.useEffect(() => { if (!editing) setDraft({ title: artifact.title, url: artifact.url || '', description: artifact.body || '', artifactType: artifact.artifactType || 'link', tags: (artifact.tags || []).join(', ') }); }, [artifact.id, editing]);
+
+  const typeIcon = { link: 'link', confluence: 'ext', file: 'doc' }[draft.artifactType] || 'link';
+  const typeLabel = { link: 'Link', confluence: 'Confluence', file: 'File' };
+
+  if (editing) {
+    return (
+      <div className="note-card note-card-editing">
+        <div className="field">
+          <span className="field-label">Title</span>
+          <input className="input" value={draft.title} autoFocus onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+        </div>
+        {draft.artifactType !== 'confluence' && (
+          <div className="field">
+            <span className="field-label">URL</span>
+            <input className="input" value={draft.url} placeholder="https://…" onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
+          </div>
+        )}
+        <div className="field">
+          <span className="field-label">Description</span>
+          <textarea className="textarea" value={draft.description} rows={2} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+        </div>
+        <div className="field">
+          <span className="field-label">Tags (comma-separated)</span>
+          <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-danger-ghost" onClick={() => { if (confirm('Delete artifact?')) actions.deleteNote(artifact.id); }}>Delete</button>
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => {
+            if (!draft.title) return;
+            actions.updateNote(artifact.id, { title: draft.title, url: draft.url, body: draft.description, artifactType: draft.artifactType, tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean) });
+            setEditing(false);
+          }}>Save</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="note-card note-card-hoverable" onClick={() => setEditing(true)}>
+      <div className="note-head">
+        <Pill tone="info"><Icon name={typeIcon} size={9} /> {typeLabel[artifact.artifactType] || 'Link'}</Pill>
+        {artifact.url
+          ? <a href={artifact.url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 500, color: 'var(--fg)', textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>{artifact.title}</a>
+          : <span className="note-title">{artifact.title}</span>}
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>{fmtDate(artifact.date)}</span>
+        <Icon name="edit" size={11} className="note-edit-icon" />
+      </div>
+      {artifact.url && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{artifact.url}</div>}
+      {artifact.body && <div className="note-body">{artifact.body}</div>}
+      {(artifact.tags || []).length > 0 && <div className="note-tags">{artifact.tags.map((t) => <span key={t} className="tag">#{t}</span>)}</div>}
+    </div>
+  );
+}
+
+function ArtifactsTab({ project, artifacts, state }) {
+  const [adding, setAdding] = React.useState(false);
+  const [addType, setAddType] = React.useState('link');
+  const [pageSearch, setPageSearch] = React.useState('');
+  const emptyDraft = { title: '', url: '', description: '', tags: '' };
+  const [draft, setDraft] = React.useState(emptyDraft);
+
+  const confluencePages = state.confluencePages || [];
+  const filteredPages = pageSearch
+    ? confluencePages.filter((p) => p.title.toLowerCase().includes(pageSearch.toLowerCase()) || (p.tags || []).some((t) => t.includes(pageSearch.toLowerCase())))
+    : confluencePages;
+
+  const handleSaveConfluence = (page) => {
+    actions.addNote({ projectId: project.id, kind: 'artifact', artifactType: 'confluence', title: page.title, url: '', confluencePageId: page.id, body: draft.description, tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean) });
+    setDraft(emptyDraft);
+    setPageSearch('');
+    setAdding(false);
+  };
+
+  const handleSave = () => {
+    if (!draft.title) return;
+    actions.addNote({ projectId: project.id, kind: 'artifact', artifactType: addType, title: draft.title, url: draft.url, body: draft.description, tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean) });
+    setDraft(emptyDraft);
+    setAdding(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <span className="card-head-title">Artifacts</span>
+        <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> Add</button>
+      </div>
+      {adding && (
+        <div style={{ padding: 14, borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
+          <div className="field">
+            <span className="field-label">Type</span>
+            <div className="seg">
+              {[['link', 'Link'], ['confluence', 'Confluence page'], ['file', 'File']].map(([v, l]) => (
+                <button key={v} className={`seg-btn ${addType === v ? 'active' : ''}`} onClick={() => { setAddType(v); setDraft(emptyDraft); setPageSearch(''); }}>{l}</button>
+              ))}
+            </div>
+          </div>
+          {addType === 'confluence' ? (
+            <>
+              <div className="field">
+                <span className="field-label">Search Confluence pages</span>
+                <input className="input" autoFocus placeholder="Filter by title or tag…" value={pageSearch} onChange={(e) => setPageSearch(e.target.value)} />
+              </div>
+              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 6, marginBottom: 8 }}>
+                {filteredPages.length === 0 && <div style={{ padding: '12px 14px', color: 'var(--fg-4)', fontSize: 12 }}>No pages found.</div>}
+                {filteredPages.map((p) => (
+                  <div key={p.id} className="note-card note-card-hoverable" style={{ borderRadius: 0, borderBottom: '1px solid var(--line)' }} onClick={() => handleSaveConfluence(p)}>
+                    <div className="note-head">
+                      <Icon name="ext" size={11} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                      <span className="note-title">{p.title}</span>
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{fmtDate(p.updated)}</span>
+                    </div>
+                    {(p.tags || []).length > 0 && <div className="note-tags">{p.tags.map((t) => <span key={t} className="tag">#{t}</span>)}</div>}
+                  </div>
+                ))}
+              </div>
+              <div className="field">
+                <span className="field-label">Description (optional)</span>
+                <textarea className="textarea" rows={2} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+              </div>
+              <div className="modal-foot">
+                <button className="btn" onClick={() => { setAdding(false); setDraft(emptyDraft); setPageSearch(''); }}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <span className="field-label">Title</span>
+                <input className="input" autoFocus value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              </div>
+              <div className="field">
+                <span className="field-label">{addType === 'file' ? 'URL or file path' : 'URL'}</span>
+                <input className="input" value={draft.url} placeholder="https://…" onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
+              </div>
+              <div className="field">
+                <span className="field-label">Description (optional)</span>
+                <textarea className="textarea" rows={2} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+              </div>
+              <div className="field">
+                <span className="field-label">Tags (comma-separated)</span>
+                <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
+              </div>
+              <div className="modal-foot">
+                <button className="btn" onClick={() => { setAdding(false); setDraft(emptyDraft); }}>Cancel</button>
+                <button className="btn btn-primary" disabled={!draft.title} onClick={handleSave}>Add</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {artifacts.length === 0 && !adding
+        ? <EmptyState title="No artifacts" body="Link documents, specs, or Confluence pages to this project." icon="link" />
+        : artifacts.map((a) => <ArtifactRow key={a.id} artifact={a} />)}
+    </div>
+  );
+}
+
+const RECURRENCE_LABELS = { none: 'One-time', weekly: 'Weekly', biweekly: 'Biweekly', monthly: 'Monthly' };
+
+function MeetingForm({ draft, setDraft, onSave, onCancel, onDelete, autoFocus, projects }) {
+  const toggleProject = (pid) => {
+    const ids = draft.projectIds || [];
+    setDraft({ ...draft, projectIds: ids.includes(pid) ? ids.filter((x) => x !== pid) : [...ids, pid] });
+  };
+  return (
+    <div style={{ padding: '14px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
+      <div className="row-2" style={{ marginBottom: 8 }}>
+        <input className="input" placeholder="Meeting title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} autoFocus={autoFocus} />
+        <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ width: 160, flexShrink: 0 }} />
+      </div>
+      <div className="row-2" style={{ marginBottom: 8 }}>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Attendees</span>
+          <input className="input" placeholder="e.g. Alice, Bob, Carol" value={draft.attendees} onChange={(e) => setDraft({ ...draft, attendees: e.target.value })} />
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Recurrence</span>
+          <select className="select" value={draft.recurrence || 'none'} onChange={(e) => setDraft({ ...draft, recurrence: e.target.value })}>
+            {Object.entries(RECURRENCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+      </div>
+      {projects && projects.length > 0 && (
+        <div className="field">
+          <span className="field-label">Projects</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {projects.map((p) => {
+              const on = (draft.projectIds || []).includes(p.id);
+              return (
+                <button key={p.id} type="button"
+                  className={`btn btn-sm${on ? ' btn-primary' : ''}`}
+                  onClick={() => toggleProject(p.id)}>
+                  {p.code}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <div className="field">
+        <span className="field-label">Notes</span>
+        <textarea className="textarea" style={{ minHeight: 120 }} placeholder="Key points, decisions, action items…" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} />
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        {onDelete && <button className="btn btn-danger-ghost btn-sm" onClick={onDelete}>Delete</button>}
+        <button className="btn btn-sm" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary btn-sm" onClick={onSave}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+function MeetingRow({ meeting: m, projects, state }) {
+  const [editing, setEditing] = React.useState(false);
+  const makeDraft = () => ({ title: m.title, date: m.date, attendees: m.attendees || '', notes: m.notes || '', recurrence: m.recurrence || 'none', projectIds: m.projectIds || [] });
+  const [draft, setDraft] = React.useState(makeDraft);
+  const [expandedItemId, setExpandedItemId] = React.useState(null);
+  React.useEffect(() => { if (!editing) setDraft(makeDraft()); }, [m.id, editing]);
+
+  const linkedTasks = state ? (state.tasks || []).filter((t) => t.meetingId === m.id) : [];
+  const linkedDecisions = state ? (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision') : [];
+
+  if (editing) {
+    return (
+      <MeetingForm draft={draft} setDraft={setDraft} autoFocus projects={projects}
+        onSave={() => { actions.updateMeeting(m.id, draft); setEditing(false); }}
+        onCancel={() => setEditing(false)}
+        onDelete={() => { if (confirm('Delete meeting?')) actions.deleteMeeting(m.id); }}
+      />
+    );
+  }
+
+  const recLabel = m.recurrence && m.recurrence !== 'none' ? RECURRENCE_LABELS[m.recurrence] : null;
+  const taggedProjects = (projects || []).filter((p) => (m.projectIds || []).includes(p.id));
+  return (
+    <div className="note-card">
+      <div className="note-head" style={{ cursor: 'pointer' }} onClick={() => setEditing(true)}>
+        <Pill tone="info"><Icon name="clock" size={9} /> meeting</Pill>
+        <span className="note-title">{m.title}</span>
+        {recLabel && <span className="pill" style={{ fontSize: 10, padding: '1px 6px' }}>↻ {recLabel}</span>}
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>{fmtDate(m.date)}</span>
+        <Icon name="edit" size={11} className="note-edit-icon" />
+      </div>
+      {m.attendees && <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 4 }}>{m.attendees}</div>}
+      {taggedProjects.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+          {taggedProjects.map((p) => <span key={p.id} className="pcard-code" style={{ fontSize: 9.5, padding: '1px 5px' }}>{p.code}</span>)}
+        </div>
+      )}
+      {m.notes && <div className="note-body">{m.notes}</div>}
+      {(linkedTasks.length > 0 || linkedDecisions.length > 0) && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {linkedTasks.map((t) => {
+            const tp = (projects || []).find((p) => p.id === t.projectId);
+            const itemKey = 'task-' + t.id;
+            if (expandedItemId === itemKey) {
+              return (
+                <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <PriorityBadge priority={t.priority} />
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{t.title}</span>
+                    {tp && <span className="pcard-code" style={{ fontSize: 9.5 }}>{tp.code}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--fg-3)', marginBottom: t.description ? 6 : 4 }}>
+                    <span>Status: <strong>{t.status}</strong></span>
+                    {t.dueDate && <span>Due: <strong>{fmtDate(t.dueDate)}</strong></span>}
+                    {t.estimate > 0 && <span>Est: <strong>{t.estimate}h</strong></span>}
+                  </div>
+                  {t.description && <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-line' }}>{t.description}</div>}
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete task?')) { actions.deleteTask(t.id); setExpandedItemId(null); } }}>Delete</button>
+                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); window.actions.openTask(t.id); }}><Icon name="edit" size={11} /> Edit</button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 0', cursor: 'pointer' }}
+                onClick={(e) => { e.stopPropagation(); setExpandedItemId(expandedItemId === itemKey ? null : itemKey); }}>
+                <PriorityBadge priority={t.priority} />
+                <span style={{ flex: 1, minWidth: 0 }} className="truncate">{t.title}</span>
+                <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{t.status}</span>
+                <Icon name="chevronD" size={9} style={{ color: 'var(--fg-4)' }} />
+              </div>
+            );
+          })}
+          {linkedDecisions.map((n) => {
+            const itemKey = 'dec-' + n.id;
+            if (expandedItemId === itemKey) {
+              return (
+                <div key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    {n.reversibility === 'irreversible'
+                      ? <span className="pill pill-danger" style={{ fontSize: 9.5, flexShrink: 0 }}>irreversible</span>
+                      : <span className="pill pill-accent" style={{ fontSize: 9.5, flexShrink: 0 }}>decision</span>}
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{n.title}</span>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{fmtDate(n.date)}</span>
+                  </div>
+                  {n.body && <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-line' }}>{n.body}</div>}
+                  {n.context && <div style={{ fontSize: 11, color: 'var(--fg-3)', lineHeight: 1.5, marginBottom: 4 }}><em>Context:</em> {n.context}</div>}
+                  {n.options && <div style={{ fontSize: 11, color: 'var(--fg-3)', lineHeight: 1.5, marginBottom: 4 }}><em>Options:</em> {n.options}</div>}
+                  {(n.tags || []).length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                      {n.tags.map((tag) => <span key={tag} className="pill pill-ghost">{tag}</span>)}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete decision?')) { actions.deleteNote(n.id); setExpandedItemId(null); } }}>Delete</button>
+                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); window.actions.setActiveView('decisions'); }}>View in Decisions</button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 0', cursor: 'pointer' }}
+                onClick={(e) => { e.stopPropagation(); setExpandedItemId(expandedItemId === itemKey ? null : itemKey); }}>
+                <span className="pill pill-accent" style={{ fontSize: 9.5, flexShrink: 0 }}>decision</span>
+                <span style={{ flex: 1, minWidth: 0 }} className="truncate">{n.title}</span>
+                <Icon name="chevronD" size={9} style={{ color: 'var(--fg-4)' }} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MeetingsTab({ project, meetings, state }) {
+  const [adding, setAdding] = React.useState(false);
+  const emptyDraft = () => ({ title: '', date: new Date().toISOString().slice(0, 10), attendees: '', notes: '', recurrence: 'none', projectIds: project ? [project.id] : [] });
+  const [draft, setDraft] = React.useState(emptyDraft);
+  const projects = state ? state.projects : (project ? [project] : []);
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <span className="card-head-title">Meeting notes</span>
+        <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New meeting</button>
+      </div>
+      {adding && (
+        <MeetingForm draft={draft} setDraft={setDraft} autoFocus projects={projects}
+          onSave={() => {
+            if (!draft.title || !draft.date) return;
+            actions.addMeeting(draft);
+            setDraft(emptyDraft());
+            setAdding(false);
+          }}
+          onCancel={() => { setDraft(emptyDraft()); setAdding(false); }}
+        />
+      )}
+      {meetings.length === 0
+        ? <EmptyState title="No meetings yet" body="Log meeting notes, attendees, and action items here." icon="clock" />
+        : meetings.map((m) => <MeetingRow key={m.id} meeting={m} projects={projects} state={state} />)
+      }
+    </div>
+  );
+}
+
+Object.assign(window, { ProjectView, MeetingForm, MeetingsTab, RECURRENCE_LABELS });
