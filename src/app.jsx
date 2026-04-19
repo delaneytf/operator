@@ -46,9 +46,40 @@ function App() {
   const activeProject = state.projects.find((p) => p.id === state.meta.activeProjectId);
 
   // Action-needed sidebar counts only
-  const todayActionCount = todayTasks(state).filter((t) => t._due !== null && t._due <= 0).length; // overdue+today
-  const critRiskCount = state.risks.filter((r) => r.status !== 'closed' && r.severity * r.likelihood >= 12).length;
+  const todayActionCount = todayTasks(state).filter((t) => t._due !== null && t._due <= 0).length;
   const staleCount = staleProjects(state, 10).length;
+  const critRiskCount = (state.risks || []).filter((r) => r.status !== 'closed' && r.severity * r.likelihood >= 12).length;
+
+  // Drag-to-reorder nav tabs
+  const DEFAULT_TAB_ORDER = ['today', 'portfolio', 'calendar', 'meetings', 'tasks', 'decisions', 'questions', 'risks', 'review'];
+  const tabOrder = state.meta.tabOrder || DEFAULT_TAB_ORDER;
+  const [dragId, setDragId] = React.useState(null);
+  const [dragOverId, setDragOverId] = React.useState(null);
+
+  const TAB_META = {
+    today:     { label: 'Today',        icon: 'sun',      hint: () => todayActionCount > 0 ? { count: todayActionCount, action: true } : null },
+    portfolio: { label: 'Portfolio',    icon: 'grid',     hint: () => staleCount > 0 ? { count: staleCount, action: true } : null },
+    calendar:  { label: 'Calendar',     icon: 'calendar', hint: () => null },
+    meetings:  { label: 'Meetings',     icon: 'clock',    hint: () => { const c = (state.meetings || []).length; return c > 0 ? { count: c } : null; } },
+    tasks:     { label: 'Tasks',        icon: 'check',    hint: () => { const c = (state.tasks || []).filter((t) => t.status !== 'done').length; return c > 0 ? { count: c } : null; } },
+    decisions: { label: 'Decisions',    icon: 'note',     hint: () => null },
+    questions: { label: 'Questions',    icon: 'search',   hint: () => { const c = (state.notes || []).filter((n) => n.kind === 'question' && !n.resolved).length; return c > 0 ? { count: c } : null; } },
+    risks:     { label: 'Risks',        icon: 'warn',     hint: () => { const c = (state.risks || []).filter((r) => r.status !== 'closed').length; return c > 0 ? { count: c } : null; } },
+    review:    { label: 'Weekly review',icon: 'bolt',     hint: () => null },
+  };
+
+  const onDragStart = (e, id) => { setDragId(id); e.dataTransfer.effectAllowed = 'move'; };
+  const onDragOver  = (e, id) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (id !== dragOverId) setDragOverId(id); };
+  const onDrop      = (e, targetId) => {
+    e.preventDefault();
+    if (!dragId || dragId === targetId) { setDragId(null); setDragOverId(null); return; }
+    const next = [...tabOrder];
+    next.splice(next.indexOf(dragId), 1);
+    next.splice(next.indexOf(targetId), 0, dragId);
+    actions.setMeta({ tabOrder: next });
+    setDragId(null); setDragOverId(null);
+  };
+  const onDragEnd = () => { setDragId(null); setDragOverId(null); };
 
   return (
     <div className="app">
@@ -61,48 +92,28 @@ function App() {
           </div>
         </div>
 
-        <button className={`sb-item ${state.meta.activeView === 'today' ? 'active' : ''}`} onClick={() => setView('today')}>
-          <span className="sb-item-icon"><Icon name="sun" /></span>
-          <span className="sb-item-label">Today</span>
-          {todayActionCount > 0 && <span className="sb-item-hint sb-item-hint-action">{todayActionCount}</span>}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'portfolio' ? 'active' : ''}`} onClick={() => setView('portfolio')}>
-          <span className="sb-item-icon"><Icon name="grid" /></span>
-          <span className="sb-item-label">Portfolio</span>
-          {staleCount > 0 && <span className="sb-item-hint sb-item-hint-action">{staleCount}</span>}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'calendar' ? 'active' : ''}`} onClick={() => setView('calendar')}>
-          <span className="sb-item-icon"><Icon name="calendar" /></span>
-          <span className="sb-item-label">Calendar</span>
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'meetings' ? 'active' : ''}`} onClick={() => setView('meetings')}>
-          <span className="sb-item-icon"><Icon name="clock" /></span>
-          <span className="sb-item-label">Meetings</span>
-          {(state.meetings || []).length > 0 && <span className="sb-item-hint">{(state.meetings || []).length}</span>}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'tasks' ? 'active' : ''}`} onClick={() => setView('tasks')}>
-          <span className="sb-item-icon"><Icon name="check" /></span>
-          <span className="sb-item-label">Tasks</span>
-          {(() => { const c = (state.tasks || []).filter((t) => t.status !== 'done').length; return c > 0 ? <span className="sb-item-hint">{c}</span> : null; })()}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'decisions' ? 'active' : ''}`} onClick={() => setView('decisions')}>
-          <span className="sb-item-icon"><Icon name="note" /></span>
-          <span className="sb-item-label">Decisions</span>
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'questions' ? 'active' : ''}`} onClick={() => setView('questions')}>
-          <span className="sb-item-icon"><Icon name="search" /></span>
-          <span className="sb-item-label">Questions</span>
-          {(() => { const c = (state.notes || []).filter((n) => n.kind === 'question' && !n.resolved).length; return c > 0 ? <span className="sb-item-hint">{c}</span> : null; })()}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'risks' ? 'active' : ''}`} onClick={() => setView('risks')}>
-          <span className="sb-item-icon"><Icon name="warn" /></span>
-          <span className="sb-item-label">Risks</span>
-          {(() => { const c = (state.risks || []).filter((r) => r.status !== 'closed').length; return c > 0 ? <span className="sb-item-hint">{c}</span> : null; })()}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>
-          <span className="sb-item-icon"><Icon name="bolt" /></span>
-          <span className="sb-item-label">Weekly review</span>
-        </button>
+        {tabOrder.map((id) => {
+          const tab = TAB_META[id];
+          if (!tab) return null;
+          const hint = tab.hint();
+          const isOver = dragOverId === id && dragId !== id;
+          return (
+            <button key={id}
+              className={`sb-item ${state.meta.activeView === id ? 'active' : ''} ${isOver ? 'sb-item-drag-over' : ''}`}
+              draggable
+              onDragStart={(e) => onDragStart(e, id)}
+              onDragOver={(e) => onDragOver(e, id)}
+              onDrop={(e) => onDrop(e, id)}
+              onDragEnd={onDragEnd}
+              onClick={() => setView(id)}
+              style={{ opacity: dragId === id ? 0.4 : 1 }}
+            >
+              <span className="sb-item-icon"><Icon name={tab.icon} /></span>
+              <span className="sb-item-label">{tab.label}</span>
+              {hint && <span className={`sb-item-hint${hint.action ? ' sb-item-hint-action' : ''}`}>{hint.count}</span>}
+            </button>
+          );
+        })}
 
         <div className="sb-section" style={{ marginTop: 10 }}>
           <span>Integrations</span>
@@ -257,63 +268,12 @@ function App() {
       </main>
 
       {taskModalId && <TaskModal taskId={taskModalId} state={state} onClose={() => setTaskModalId(null)} />}
-      {showQuickTask && <QuickTaskModal state={state} onClose={() => setShowQuickTask(false)} onCreated={(id) => { setShowQuickTask(false); setTaskModalId(id); }} />}
+      {showQuickTask && <TaskModal taskId={null} state={state} onClose={() => setShowQuickTask(false)} />}
       {tweaksOpen && <TweaksPanel state={state} onClose={() => setTweaksOpen(false)} />}
     </div>
   );
 }
 
-function QuickTaskModal({ state, onClose, onCreated }) {
-  const activeProjects = state.projects.filter((p) => p.status !== 'done');
-  const [title, setTitle] = React.useState('');
-  const [priority, setPriority] = React.useState('high');
-  const [pid, setPid] = React.useState(activeProjects[0]?.id || '');
-  const [due, setDue] = React.useState('');
-
-  const submit = () => {
-    if (!title.trim() || !pid) return;
-    const t = actions.addTask({ title: title.trim(), priority, projectId: pid, dueDate: due || null });
-    onCreated(t.id);
-  };
-
-  return (
-    <Modal open={true} onClose={onClose} title="New task">
-      <div className="field">
-        <span className="field-label">Title</span>
-        <input className="input" placeholder="Task title…" value={title} autoFocus
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onClose(); }} />
-      </div>
-      <div className="row-2">
-        <div className="field">
-          <span className="field-label">Project</span>
-          <select className="select" value={pid} onChange={(e) => setPid(e.target.value)}>
-            {activeProjects.map((p) => (
-              <option key={p.id} value={p.id}>{p.code} — {p.name.split('—')[1]?.trim() || p.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <span className="field-label">Priority</span>
-          <select className="select" value={priority} onChange={(e) => setPriority(e.target.value)}>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-        </div>
-        <div className="field">
-          <span className="field-label">Due date</span>
-          <input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-        </div>
-      </div>
-      <div className="modal-foot">
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={submit} disabled={!title.trim() || !pid}>Add task</button>
-      </div>
-    </Modal>
-  );
-}
 
 function TweaksPanel({ state, onClose }) {
   return (

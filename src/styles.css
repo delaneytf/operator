@@ -20,6 +20,8 @@
   --ok-soft: oklch(72% 0.12 155 / 0.15);
   --info: oklch(72% 0.10 240);
   --info-soft: oklch(72% 0.10 240 / 0.15);
+  --mtg: oklch(60% 0.15 200);
+  --mtg-soft: oklch(60% 0.15 200 / 0.15);
 
   --radius: 6px;
   --radius-lg: 10px;
@@ -409,8 +411,8 @@ textarea.inline-edit-input {
   flex-shrink: 0;
 }
 .prio-p0 { background: oklch(66% 0.17 26 / 0.18); color: oklch(70% 0.17 26); border: 1px solid oklch(66% 0.17 26 / 0.3); }
-.prio-p1 { background: oklch(78% 0.14 70 / 0.18); color: oklch(78% 0.14 70); border: 1px solid oklch(78% 0.14 70 / 0.3); }
-.prio-p2 { background: oklch(72% 0.10 240 / 0.18); color: oklch(52% 0.14 240); border: 1px solid oklch(72% 0.10 240 / 0.35); }
+.prio-p1 { background: oklch(72% 0.18 52 / 0.18); color: oklch(60% 0.18 52); border: 1px solid oklch(72% 0.18 52 / 0.3); }
+.prio-p2 { background: oklch(82% 0.20 86 / 0.18); color: oklch(62% 0.24 85); border: 1px solid oklch(82% 0.20 86 / 0.3); }
 .prio-p3 { background: var(--bg-2); color: var(--fg-2); border: 1px solid var(--line); }
 
 .sdot {
@@ -419,7 +421,7 @@ textarea.inline-edit-input {
   flex-shrink: 0;
 }
 .sdot-todo        { background: transparent; border: 1.5px solid var(--fg-4); }
-.sdot-in-progress { background: oklch(78% 0.14 70); box-shadow: 0 0 0 2px oklch(78% 0.14 70 / 0.2); }
+.sdot-in-progress { background: var(--info); box-shadow: 0 0 0 2px oklch(72% 0.10 240 / 0.25); }
 .sdot-blocked     { background: oklch(66% 0.17 26); }
 .sdot-done        { background: oklch(72% 0.12 155); }
 
@@ -555,6 +557,97 @@ textarea.inline-edit-input {
 }
 .tgroup-head:first-child { border-top: none; }
 .tgroup-head-count { color: var(--fg-4); }
+.tgroup-head-toggle { cursor: pointer; user-select: none; }
+.tgroup-head-toggle:hover { background: var(--bg-hover); }
+
+/* Priority queue expandable task rows */
+.pq-row-active { background: var(--bg-2); }
+.pq-drag-over { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+
+.pq-detail {
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px 12px 68px;
+}
+
+/* Header row: meta strip + edit button */
+.pq-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+/* Meta strip — compact horizontal badges */
+.pq-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  flex: 1;
+}
+.pq-meta-item { display: flex; align-items: center; gap: 5px; }
+.pq-meta-sep { width: 1px; height: 12px; background: var(--line); flex-shrink: 0; }
+
+/* Sections */
+.pq-section { margin-bottom: 12px; }
+.pq-section-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-4);
+  margin-bottom: 6px;
+}
+.pq-section-val {
+  font-size: 13px;
+  color: var(--fg-2);
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+/* List items (blockers, deps) */
+.pq-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.pq-list-item:last-child { border-bottom: none; padding-bottom: 0; }
+.pq-list-item-link { cursor: pointer; border-radius: 4px; }
+.pq-list-item-link:hover { background: var(--bg-hover); }
+.pq-list-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.pq-list-icon-danger { background: var(--danger-soft); color: var(--danger); }
+.pq-list-icon-warn { background: var(--warn-soft); color: var(--warn); }
+.pq-list-icon-ok { background: color-mix(in oklch, var(--ok) 12%, transparent); color: var(--ok); }
+.pq-list-icon-info { background: var(--info-soft); color: var(--info); }
+.pq-list-icon-accent { background: color-mix(in oklch, var(--accent) 14%, transparent); color: var(--accent); }
+
+/* Footer */
+.pq-detail-foot {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
 
 /* Project card in portfolio — horizontal stacked rows */
 .pcard-stack {
@@ -1476,6 +1569,16 @@ textarea.inline-edit-input {
 
 /* Sidebar action hint */
 .sb-item-hint-action { background: none !important; color: var(--warn) !important; font-weight: 700 !important; }
+.sb-item-drag-over { background: var(--bg-hover); border-top: 2px solid var(--accent); }
+.tab-drag-over { box-shadow: -2px 0 0 var(--accent); }
+
+/* Overview tile drag-and-drop */
+.tile-drag-over { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+[class~="tile-drag-over"] .card-head, .card-head { cursor: default; }
+[draggable] .card-head { cursor: grab; user-select: none; }
+[draggable] .card-head:active { cursor: grabbing; }
+[draggable] .card-head button,
+[draggable] .card-head select { cursor: pointer; }
 
 /* Topbar search */
 .topbar-search {
@@ -1574,8 +1677,8 @@ textarea.inline-edit-input {
 .cal-item:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.15); z-index: 2; }
 .cal-item[draggable]:active { cursor: grabbing; }
 .cal-task.p0 { background: var(--danger); color: #fff; border: 1px solid color-mix(in oklch, var(--danger) 70%, #000); font-weight: 600; }
-.cal-task.p1 { background: color-mix(in oklch, var(--warn) 30%, var(--bg)); color: oklch(55% 0.18 65); border: 1px solid color-mix(in oklch, var(--warn) 50%, transparent); }
-.cal-task.p2 { background: oklch(72% 0.10 240 / 0.18); color: oklch(52% 0.14 240); border: 1px solid oklch(72% 0.10 240 / 0.35); }
+.cal-task.p1 { background: oklch(72% 0.18 52 / 0.22); color: oklch(48% 0.18 52); border: 1px solid oklch(72% 0.18 52 / 0.4); }
+.cal-task.p2 { background: oklch(82% 0.20 86 / 0.22); color: oklch(52% 0.24 85); border: 1px solid oklch(82% 0.20 86 / 0.35); }
 .cal-task.p3 { background: var(--bg-2); color: var(--fg-2); border: 1px solid var(--line); }
 .cal-task-done { opacity: 0.45; text-decoration: line-through; }
 .cal-milestone { background: var(--accent); color: var(--bg); height: 20px; font-weight: 600; }
@@ -1607,8 +1710,8 @@ textarea.inline-edit-input {
 .cal-leg-item { display: inline-flex; align-items: center; gap: 5px; }
 .cal-leg-dot { width: 10px; height: 10px; border-radius: 2px; }
 .cal-leg-dot.p0 { background: var(--danger); }
-.cal-leg-dot.p1 { background: var(--warn); }
-.cal-leg-dot.p2 { background: oklch(72% 0.10 240); }
+.cal-leg-dot.p1 { background: oklch(72% 0.18 52); }
+.cal-leg-dot.p2 { background: oklch(82% 0.20 86); }
 .cal-leg-dot.p3 { background: var(--fg-3); }
 
 /* Decisions / Search shared card styles */

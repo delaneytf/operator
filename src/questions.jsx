@@ -1,243 +1,362 @@
-// Questions log — open questions and their resolutions.
+// Questions log — tasks-style layout: metrics, search/filter, collapsible sections, expandable rows, modal edit.
 
 function QuestionsView({ state }) {
   const [filterProject, setFilterProject] = React.useState('all');
   const [search, setSearch] = React.useState('');
-  const [openId, setOpenId] = React.useState(null);
-  const [editing, setEditing] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState({ resolved: true });
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [modalId, setModalId] = React.useState(null);
+  const [showModal, setShowModal] = React.useState(false);
+  const [resolveId, setResolveId] = React.useState(null);
 
-  const all = (state.notes || [])
-    .filter((n) => n.kind === 'question')
+  const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const weekAgoStr = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); })();
+
+  const allQ = (state.notes || []).filter((n) => n.kind === 'question');
+
+  const filtered = allQ
     .filter((n) => filterProject === 'all' || (n.projectIds || [n.projectId]).filter(Boolean).includes(filterProject))
-    .filter((n) => !search || n.title.toLowerCase().includes(search.toLowerCase()) || (n.body || '').toLowerCase().includes(search.toLowerCase()))
+    .filter((n) => !search || n.title.toLowerCase().includes(search.toLowerCase())
+      || (n.body || '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-  const open = all.filter((n) => !n.resolved);
-  const resolved = all.filter((n) => n.resolved);
-  const selected = (state.notes || []).find((n) => n.id === openId);
+  const open = filtered.filter((n) => !n.resolved);
+  const resolved = filtered.filter((n) => n.resolved);
 
-  const newQuestion = () => {
-    const newId = `n-q-${Date.now()}`;
-    const initIds = filterProject !== 'all' ? [filterProject] : (state.projects[0] ? [state.projects[0].id] : []);
-    actions.addNote({ id: newId, projectId: initIds[0] || '', projectIds: initIds, kind: 'question', title: 'New question', body: '', date: new Date().toISOString().slice(0, 10), tags: [], resolved: false, resolution: '' });
-    setOpenId(newId);
-    setEditing(true);
-  };
+  // Metrics across all questions
+  const metricOpen = allQ.filter((n) => !n.resolved).length;
+  const metricResolved = allQ.filter((n) => n.resolved).length;
+  const metricTotal = allQ.length;
+  const metricThisWeek = allQ.filter((n) => (n.date || '') >= weekAgoStr).length;
+
+  const metrics = [
+    { label: 'Open', value: metricOpen, color: metricOpen > 0 ? 'var(--warn)' : 'var(--fg-4)' },
+    { label: 'Resolved', value: metricResolved, color: 'var(--ok)' },
+    { label: 'Total', value: metricTotal, color: 'var(--fg-2)' },
+    { label: 'This week', value: metricThisWeek, color: 'var(--fg-2)' },
+  ];
+
+  const openModal = (id) => { setModalId(id || null); setShowModal(true); };
 
   return (
-    <div className="content-narrow decisions-wrap" style={{ maxWidth: 1280 }}>
-      <div style={{ marginBottom: 14 }}>
-        <div className="row-flex-sb" style={{ alignItems: 'flex-end' }}>
-          <div>
-            <div className="title-h1">Questions</div>
-            <div className="title-sub">{open.length} open · {resolved.length} resolved</div>
+    <>
+    <div className="content-narrow">
+      <div className="row-flex-sb" style={{ marginBottom: 20, alignItems: 'flex-end' }}>
+        <div>
+          <div className="title-h1">Questions</div>
+          <div className="title-sub">{metricOpen} open · {metricResolved} resolved</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => openModal(null)}>
+          <Icon name="plus" size={11} /> New question
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, background: 'var(--line)', border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
+        {metrics.map((m) => (
+          <div key={m.label} style={{ background: 'var(--bg-1)', padding: '10px 14px' }}>
+            <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 4 }}>{m.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: m.color, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em' }}>{m.value}</div>
           </div>
-          <button className="btn btn-primary" onClick={newQuestion}>
-            <Icon name="plus" size={11} /> New question
-          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="input" placeholder="Search questions…" value={search} onChange={(e) => setSearch(e.target.value)}
+          style={{ fontSize: 12, width: 200, flexShrink: 0 }} />
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
+          <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All</button>
+          {state.projects.map((p) => (
+            <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
+              onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
+              {p.code}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="decisions-split">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
-          <input className="input" placeholder="Search questions…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ fontSize: 12 }} />
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All</button>
-            {state.projects.map((p) => (
-              <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
-                onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
-                {p.code}
-              </button>
+      <div className="card">
+        {filtered.length === 0 && <div className="empty">No questions match.</div>}
+
+        {open.length > 0 && (
+          <div>
+            <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('open')}>
+              <Icon name={collapsed['open'] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+              <span style={{ color: 'var(--warn)' }}>Open</span>
+              <span className="tgroup-head-count">{open.length}</span>
+            </div>
+            {!collapsed['open'] && open.map((n) => (
+              <QuestionRow key={n.id} note={n} projects={state.projects}
+                expanded={expandedId === n.id}
+                onToggleExpand={() => toggleExpand(n.id)}
+                onEdit={() => openModal(n.id)}
+                onResolve={() => setResolveId(n.id)} />
             ))}
           </div>
-          <div className="decisions-list card" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-            {open.length > 0 && (
-              <>
-                <div className="dec-section-hd">Open</div>
-                {open.map((n) => (
-                  <QuestionCard key={n.id} note={n} projects={state.projects}
-                    active={openId === n.id} onOpen={() => { setOpenId(n.id); setEditing(false); }} />
-                ))}
-              </>
-            )}
-            {resolved.length > 0 && (
-              <>
-                <div className="dec-section-hd">Resolved</div>
-                {resolved.map((n) => (
-                  <QuestionCard key={n.id} note={n} projects={state.projects}
-                    active={openId === n.id} onOpen={() => { setOpenId(n.id); setEditing(false); }} />
-                ))}
-              </>
-            )}
-            {all.length === 0 && <div className="empty">No questions match.</div>}
+        )}
+
+        {resolved.length > 0 && (
+          <div>
+            <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('resolved')}>
+              <Icon name={collapsed['resolved'] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+              <span style={{ color: 'var(--ok)' }}>Resolved</span>
+              <span className="tgroup-head-count">{resolved.length}</span>
+            </div>
+            {!collapsed['resolved'] && resolved.map((n) => (
+              <QuestionRow key={n.id} note={n} projects={state.projects}
+                expanded={expandedId === n.id}
+                onToggleExpand={() => toggleExpand(n.id)}
+                onEdit={() => openModal(n.id)}
+                onResolve={() => setResolveId(n.id)} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+
+    {showModal && (
+      <QuestionModal noteId={modalId} state={state}
+        defaults={{ projectId: filterProject !== 'all' ? filterProject : undefined }}
+        onClose={() => { setShowModal(false); setModalId(null); }} />
+    )}
+    {resolveId && (
+      <ResolveQuestionModal noteId={resolveId} state={state} onClose={() => setResolveId(null)} />
+    )}
+    </>
+  );
+}
+
+function QuestionRow({ note, projects, expanded, onToggleExpand, onEdit, onResolve }) {
+  const noteProjects = (note.projectIds || [note.projectId]).filter(Boolean)
+    .map((pid) => projects.find((p) => p.id === pid)).filter(Boolean);
+
+  return (
+    <React.Fragment>
+      <div
+        className={`trow${expanded ? ' trow-expanded' : ''}`}
+        style={{ gridTemplateColumns: '20px 1fr 80px 90px 54px 22px', cursor: 'pointer' }}
+        onClick={onToggleExpand}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: note.resolved ? 'var(--ok)' : 'var(--warn)', flexShrink: 0 }} />
+        </div>
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>
+          <span className="truncate" style={{ fontWeight: 500, fontSize: 13 }}>{note.title}</span>
+        </div>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', display: 'flex', alignItems: 'center' }}>
+          {fmtDate(note.date)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {note.resolved
+            ? <span className="pill pill-ok" style={{ fontSize: 10, padding: '1px 6px' }}>resolved</span>
+            : <span className="pill pill-warn" style={{ fontSize: 10, padding: '1px 6px' }}>open</span>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+          {noteProjects.length > 0
+            ? <ProjectChip project={noteProjects[0]} />
+            : <ProjectChip project={null} />}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={expanded ? 'chevronD' : 'chevronR'} size={10} style={{ color: 'var(--fg-4)' }} />
+        </div>
+      </div>
+      {expanded && (
+        <div className="pq-detail" onClick={(e) => e.stopPropagation()}>
+          <div className="pq-meta-row">
+            <div className="pq-meta">
+              <span className="pq-meta-item">
+                {note.resolved
+                  ? <span className="pill pill-ok" style={{ fontSize: 10, padding: '1px 6px' }}>resolved</span>
+                  : <span className="pill pill-warn" style={{ fontSize: 10, padding: '1px 6px' }}>open</span>}
+              </span>
+              {noteProjects.length > 0 && (
+                <>
+                  <span className="pq-meta-sep" />
+                  <span className="pq-meta-item">
+                    {noteProjects.map((p) => <ProjectChip key={p.id} project={p} />)}
+                  </span>
+                </>
+              )}
+              <span className="pq-meta-sep" />
+              <span className="pq-meta-item mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>Asked {fmtDate(note.date)}</span>
+              {note.resolvedAt && (
+                <>
+                  <span className="pq-meta-sep" />
+                  <span className="pq-meta-item mono" style={{ fontSize: 11, color: 'var(--ok)' }}>Resolved {fmtDate(note.resolvedAt)}</span>
+                </>
+              )}
+            </div>
+            <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+              <Icon name="edit" size={11} /> Edit
+            </button>
+          </div>
+          {note.body && (
+            <div className="pq-section">
+              <div className="pq-section-label">Context</div>
+              <div className="pq-section-val">{note.body}</div>
+            </div>
+          )}
+          {note.resolved && (
+            <div className="pq-section">
+              <div className="pq-section-label">Resolution</div>
+              <div className="pq-section-val">
+                {note.resolution || <em style={{ color: 'var(--fg-4)' }}>No resolution text added.</em>}
+              </div>
+            </div>
+          )}
+          {noteProjects.length > 1 && (
+            <div className="pq-section">
+              <div className="pq-section-label">Projects</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {noteProjects.map((p) => <ProjectChip key={p.id} project={p} />)}
+              </div>
+            </div>
+          )}
+          {(note.tags || []).length > 0 && (
+            <div className="pq-section">
+              <div className="pq-section-label">Tags</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {note.tags.map((t) => <span key={t} className="pill pill-ghost">{t}</span>)}
+              </div>
+            </div>
+          )}
+          <div className="pq-detail-foot" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Asked {fmtDate(note.date)}</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {!note.resolved && (
+                <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); onResolve(); }}>Resolve</button>
+              )}
+              {note.resolved && (
+                <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); actions.updateNote(note.id, { resolved: false, resolvedAt: null }); }}>Re-open</button>
+              )}
+            </div>
           </div>
         </div>
-
-        <div className="card" style={{ overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {!selected ? (
-            <div className="empty-pane">
-              <div style={{ fontSize: 13, marginBottom: 6 }}>Select a question to see details and resolution.</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-4)' }}>Log open questions here to track what's unresolved and why.</div>
-            </div>
-          ) : (
-            <QuestionDetail key={selected.id} note={selected} projects={state.projects} editing={editing} setEditing={setEditing} />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QuestionCard({ note, projects, active, onOpen }) {
-  const noteProjects = (note.projectIds || [note.projectId]).filter(Boolean)
-    .map((pid) => (projects || []).find((p) => p.id === pid)).filter(Boolean);
-  return (
-    <div className={`dec-card dec-card-hoverable ${active ? 'active' : ''}`} onClick={onOpen}>
-      <div className="dec-card-hd">
-        {noteProjects.length > 0
-          ? noteProjects.map((p) => <ProjectChip key={p.id} project={p} />)
-          : <ProjectChip project={null} />}
-        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{fmtDate(note.date)}</span>
-        {note.resolved && <span className="pill pill-ok" style={{ fontSize: 9.5, padding: '1px 6px' }}>resolved</span>}
-      </div>
-      <div className="dec-card-title">{note.title}</div>
-      {note.body && <div className="dec-card-body">{note.body}</div>}
-      {note.resolved && note.resolution && (
-        <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 4, lineHeight: 1.4, fontStyle: 'italic' }}>→ {note.resolution}</div>
       )}
-    </div>
+    </React.Fragment>
   );
 }
 
-function QuestionDetail({ note, projects, editing, setEditing }) {
-  const [local, setLocal] = React.useState(note);
-  const [resolving, setResolving] = React.useState(false);
-  const [resolutionDraft, setResolutionDraft] = React.useState('');
-  React.useEffect(() => { setLocal(note); setResolving(false); }, [note.id]);
+function QuestionModal({ noteId, state, defaults, onClose }) {
+  const existing = noteId ? (state.notes || []).find((n) => n.id === noteId) : null;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const initProjectId = defaults?.projectId || (state.projects[0]?.id || '');
 
-  const save = (patch) => {
-    const next = { ...local, ...patch };
-    setLocal(next);
-    actions.updateNote(note.id, patch);
-  };
+  const [local, setLocal] = React.useState(existing ? { ...existing } : {
+    kind: 'question', title: '', body: '', resolution: '',
+    tags: [], date: todayIso, projectId: initProjectId,
+    projectIds: initProjectId ? [initProjectId] : [], resolved: false,
+  });
+
+  const set = (patch) => setLocal((prev) => ({ ...prev, ...patch }));
 
   const toggleProject = (pid) => {
     const ids = local.projectIds || [local.projectId].filter(Boolean);
     const next = ids.includes(pid) ? ids.filter((x) => x !== pid) : [...ids, pid];
-    save({ projectIds: next, projectId: next[0] || '' });
+    set({ projectIds: next, projectId: next[0] || '' });
   };
 
-  const noteProjectIds = local.projectIds || [local.projectId].filter(Boolean);
-  const noteProjects = noteProjectIds.map((pid) => (projects || []).find((p) => p.id === pid)).filter(Boolean);
-
-  if (editing) {
-    return (
-      <div className="dec-detail" style={{ overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
-        <input className="input" style={{ fontSize: 18, fontWeight: 600, marginBottom: 10 }} value={local.title} autoFocus onChange={(e) => save({ title: e.target.value })} />
-        <div className="row-flex" style={{ marginBottom: 10 }}>
-          <input className="input" type="date" value={local.date || ''} onChange={(e) => save({ date: e.target.value })} style={{ width: 150 }} />
-        </div>
-        {(projects || []).length > 0 && (
-          <div className="field">
-            <span className="field-label">Projects</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-              {(projects || []).map((p) => {
-                const on = noteProjectIds.includes(p.id);
-                return (
-                  <button key={p.id} type="button" className={`btn btn-sm${on ? ' btn-primary' : ''}`}
-                    onClick={() => toggleProject(p.id)}>
-                    {p.code}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        <div className="field">
-          <span className="field-label">Question / context</span>
-          <textarea className="input" rows={3} value={local.body || ''} onChange={(e) => save({ body: e.target.value })} placeholder="What are you trying to answer?" />
-        </div>
-        <div className="field">
-          <span className="field-label">Resolution</span>
-          <textarea className="input" rows={3} value={local.resolution || ''} onChange={(e) => save({ resolution: e.target.value })} placeholder="How was this resolved?" />
-        </div>
-        <div className="field">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
-            <input type="checkbox" checked={!!local.resolved} onChange={(e) => save({ resolved: e.target.checked })} />
-            Mark as resolved
-          </label>
-        </div>
-        <div className="field">
-          <span className="field-label">Tags</span>
-          <input className="input" value={(local.tags || []).join(', ')} onChange={(e) => save({ tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })} />
-        </div>
-        <div className="row-flex" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-          <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete this question?')) { actions.deleteNote(note.id); } }}>
-            <Icon name="trash" size={11} /> Delete
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setEditing(false)}>Done</button>
-        </div>
-      </div>
-    );
-  }
+  const handleSave = () => {
+    if (!local.title.trim()) return;
+    if (existing) {
+      actions.updateNote(noteId, local);
+    } else {
+      actions.addNote({ ...local, kind: 'question' });
+    }
+    onClose();
+  };
 
   return (
-    <div className="dec-detail" style={{ overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
-      <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-        <div className="row-flex" style={{ flexWrap: 'wrap', gap: 6 }}>
-          {noteProjects.map((p) => <ProjectChip key={p.id} project={p} />)}
-          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>{fmtDate(note.date)}</span>
-          {note.resolved
-            ? <span className="pill pill-ok">resolved</span>
-            : <span className="pill pill-warn">open</span>}
-        </div>
-        <div className="row-flex" style={{ gap: 6, flexShrink: 0 }}>
-          {note.resolved
-            ? <button className="btn btn-sm" onClick={() => save({ resolved: false, resolution: '' })}>Re-open</button>
-            : <button className="btn btn-primary btn-sm" onClick={() => { setResolutionDraft(''); setResolving(true); }}>Resolve</button>}
-          <button className="btn btn-sm" onClick={() => setEditing(true)}><Icon name="edit" size={11} /> Edit</button>
+    <Modal open title={existing ? 'Edit question' : 'New question'} onClose={onClose}>
+      <div className="field">
+        <span className="field-label">Question</span>
+        <input className="input" autoFocus value={local.title} onChange={(e) => set({ title: e.target.value })}
+          placeholder="What are you trying to answer?" />
+      </div>
+      <div className="row-2">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Date asked</span>
+          <input className="input" type="date" value={local.date || todayIso} onChange={(e) => set({ date: e.target.value })} />
         </div>
       </div>
-
-      <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 12, letterSpacing: '-0.01em' }}>{note.title}</div>
-
-      {note.body && (
-        <>
-          <div className="dec-section-label">Context</div>
-          <div className="dec-body">{note.body}</div>
-        </>
-      )}
-
-      {note.resolved && (
-        <>
-          <div className="dec-section-label" style={{ marginTop: 16 }}>Resolution</div>
-          <div className="dec-body">{note.resolution || <em style={{ color: 'var(--fg-4)' }}>No resolution text added.</em>}</div>
-        </>
-      )}
-
-      {(note.tags || []).length > 0 && (
-        <div className="row-flex" style={{ marginTop: 16, gap: 6, flexWrap: 'wrap' }}>
-          {note.tags.map((t) => <span key={t} className="pill pill-ghost">{t}</span>)}
+      {state.projects.length > 0 && (
+        <div className="field">
+          <span className="field-label">Projects</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {state.projects.map((p) => {
+              const ids = local.projectIds || [local.projectId].filter(Boolean);
+              return (
+                <button key={p.id} type="button" className={`btn btn-sm${ids.includes(p.id) ? ' btn-primary' : ''}`}
+                  onClick={() => toggleProject(p.id)}>
+                  {p.code}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
+      <div className="field">
+        <span className="field-label">Context</span>
+        <textarea className="textarea" rows={2} value={local.body || ''} onChange={(e) => set({ body: e.target.value })}
+          placeholder="What background is needed to understand this?" />
+      </div>
+      <div className="field">
+        <span className="field-label">Resolution</span>
+        <textarea className="textarea" rows={2} value={local.resolution || ''} onChange={(e) => set({ resolution: e.target.value })}
+          placeholder="How was this resolved?" />
+      </div>
+      <div className="field">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
+          <input type="checkbox" checked={!!local.resolved} onChange={(e) => set({ resolved: e.target.checked })} />
+          Mark as resolved
+        </label>
+      </div>
+      <div className="field">
+        <span className="field-label">Tags</span>
+        <input className="input" value={(local.tags || []).join(', ')}
+          onChange={(e) => set({ tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })}
+          placeholder="e.g. architecture, vendor" />
+      </div>
+      <div className="modal-foot">
+        {existing && (
+          <button className="btn btn-danger btn-sm"
+            onClick={() => { if (confirm('Delete this question?')) { actions.deleteNote(noteId); onClose(); } }}>
+            <Icon name="trash" size={11} /> Delete
+          </button>
+        )}
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" disabled={!local.title.trim()} onClick={handleSave}>
+          {existing ? 'Save changes' : 'Log question'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
-      {resolving && (
-        <Modal open={true} onClose={() => setResolving(false)} title="Resolve question">
-          <div className="field">
-            <span className="field-label">Resolution</span>
-            <textarea className="input" rows={4} autoFocus value={resolutionDraft}
-              onChange={(e) => setResolutionDraft(e.target.value)}
-              placeholder="How was this resolved? What did you decide or learn?" />
-          </div>
-          <div className="modal-foot">
-            <button className="btn" onClick={() => setResolving(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={() => { save({ resolved: true, resolution: resolutionDraft }); setResolving(false); }}>
-              Mark resolved
-            </button>
-          </div>
-        </Modal>
-      )}
-    </div>
+function ResolveQuestionModal({ noteId, state, onClose }) {
+  const note = (state.notes || []).find((n) => n.id === noteId);
+  const [resolution, setResolution] = React.useState(note?.resolution || '');
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (!note) return null;
+
+  return (
+    <Modal open title="Resolve question" onClose={onClose}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 16, color: 'var(--fg-1)' }}>{note.title}</div>
+      <div className="field">
+        <span className="field-label">Resolution</span>
+        <textarea className="textarea" rows={4} autoFocus value={resolution}
+          onChange={(e) => setResolution(e.target.value)}
+          placeholder="How was this resolved? What did you decide or learn?" />
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => { actions.updateNote(noteId, { resolved: true, resolution, resolvedAt: todayIso }); onClose(); }}>
+          Mark resolved
+        </button>
+      </div>
+    </Modal>
   );
 }
 

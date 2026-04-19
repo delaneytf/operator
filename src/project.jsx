@@ -76,6 +76,7 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const project = state.projects.find((p) => p.id === projectId);
   const [tab, setTab] = React.useState('overview');
   const [addingTask, setAddingTask] = React.useState(false);
+  const [readOnlyTaskId, setReadOnlyTaskId] = React.useState(null);
 
   if (!project) return <EmptyState title="Project not found" />;
 
@@ -89,15 +90,32 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const prog = projectProgress(state, projectId);
   const risk = projectRiskScore(state, projectId);
 
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: 'target' },
-    { id: 'tasks', label: 'Tasks', icon: 'list', count: openTasks.length },
-    { id: 'milestones', label: 'Milestones', icon: 'flag', count: milestones.filter((m) => m.status !== 'done').length },
-    { id: 'notes', label: 'Notes', icon: 'note', count: notes.length },
-    { id: 'artifacts', label: 'Artifacts', icon: 'link', count: artifacts.length },
-    { id: 'risks', label: 'Risks', icon: 'warn', count: risks.filter((r) => r.status !== 'closed').length },
-    { id: 'meetings', label: 'Meetings', icon: 'clock', count: meetings.length },
+  const TAB_DEFS = [
+    { id: 'overview',   label: 'Overview',   icon: 'target' },
+    { id: 'tasks',      label: 'Tasks',      icon: 'list',     count: openTasks.length },
+    { id: 'milestones', label: 'Milestones', icon: 'flag',     count: milestones.filter((m) => m.status !== 'done').length },
+    { id: 'notes',      label: 'Notes',      icon: 'note',     count: notes.length },
+    { id: 'artifacts',  label: 'Artifacts',  icon: 'link',     count: artifacts.length },
+    { id: 'risks',      label: 'Risks',      icon: 'warn',     count: risks.filter((r) => r.status !== 'closed').length },
+    { id: 'meetings',   label: 'Meetings',   icon: 'clock',    count: meetings.length },
   ];
+  const DEFAULT_PROJECT_TAB_ORDER = TAB_DEFS.map((t) => t.id);
+  const projectTabOrder = state.meta.projectTabOrder || DEFAULT_PROJECT_TAB_ORDER;
+  const [dragTabOverId, setDragTabOverId] = React.useState(null);
+  const onTabDragStart = (e, id) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); };
+  const onTabDragOver  = (e, id) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (id !== dragTabOverId) setDragTabOverId(id); };
+  const onTabDragLeave = (e, id) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragTabOverId(null); };
+  const onTabDrop      = (e, targetId) => {
+    e.preventDefault();
+    setDragTabOverId(null);
+    const dragId = e.dataTransfer.getData('text/plain');
+    if (!dragId || dragId === targetId) return;
+    const next = [...projectTabOrder];
+    next.splice(next.indexOf(dragId), 1);
+    next.splice(next.indexOf(targetId), 0, dragId);
+    actions.setMeta({ projectTabOrder: next });
+  };
+  const onTabDragEnd = () => setDragTabOverId(null);
 
   return (
     <div className="content-narrow">
@@ -184,12 +202,25 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
 
       {/* Tabs */}
       <div className="tabs">
-        {tabs.map((t) => (
-          <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
-            <Icon name={t.icon} size={12} /> {t.label}
-            {t.count !== undefined && <span className="tab-count">{t.count}</span>}
-          </button>
-        ))}
+        {projectTabOrder.map((tabId) => {
+          const t = TAB_DEFS.find((x) => x.id === tabId);
+          if (!t) return null;
+          return (
+            <button key={t.id}
+              className={`tab ${tab === t.id ? 'active' : ''} ${dragTabOverId === t.id ? 'tab-drag-over' : ''}`}
+              draggable
+              onDragStart={(e) => onTabDragStart(e, t.id)}
+              onDragOver={(e) => onTabDragOver(e, t.id)}
+              onDragLeave={(e) => onTabDragLeave(e, t.id)}
+              onDrop={(e) => onTabDrop(e, t.id)}
+              onDragEnd={onTabDragEnd}
+              onClick={() => setTab(t.id)}
+            >
+              <Icon name={t.icon} size={12} /> {t.label}
+              {t.count !== undefined && <span className="tab-count">{t.count}</span>}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'overview' && <OverviewTab project={project} state={state} milestones={milestones} tasks={tasks} onGoto={setTab} />}
@@ -199,7 +230,7 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
             <span className="card-head-title">Tasks · drag to reorder within priority</span>
             <button className="btn btn-sm btn-primary" onClick={() => setAddingTask(true)}><Icon name="plus" size={11} /> New task</button>
           </div>
-          {addingTask && <ProjectTaskAddForm project={project} onDone={() => setAddingTask(false)} />}
+          {addingTask && <TaskModal taskId={null} state={state} defaults={{ projectId: project.id }} onClose={() => setAddingTask(false)} />}
           {tasks.length === 0 && !addingTask ? (
             <EmptyState title="No tasks yet" body="Add the first task to start executing." icon="plus" />
           ) : (
@@ -207,23 +238,29 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
               tasks={tasks}
               projects={[project]}
               onOpen={onOpenTask}
+              onJumpTo={(id) => setReadOnlyTaskId(id)}
               onToggle={actions.toggleTaskDone}
               onReorder={(priority, ids) => actions.reorderTasks(project.id, priority, ids)}
             />
+          )}
+          {readOnlyTaskId && (
+            <TaskReadOnlyModal taskId={readOnlyTaskId} state={state}
+              onClose={() => setReadOnlyTaskId(null)}
+              onEdit={(id) => { setReadOnlyTaskId(null); onOpenTask(id); }}
+              onJumpTo={(id) => setReadOnlyTaskId(id)} />
           )}
         </div>
       )}
       {tab === 'milestones' && <MilestonesTab project={project} milestones={milestones} />}
       {tab === 'notes' && <NotesTab project={project} notes={notes} />}
       {tab === 'artifacts' && <ArtifactsTab project={project} artifacts={artifacts} state={state} />}
-      {tab === 'risks' && <RisksTab project={project} risks={risks} />}
+      {tab === 'risks' && <RisksTab project={project} risks={risks} state={state} />}
       {tab === 'meetings' && <MeetingsTab project={project} meetings={meetings} state={state} />}
     </div>
   );
 }
 
 function OverviewTab({ project, state, milestones, tasks, onGoto }) {
-  const nextMs = milestones.filter((m) => m.status !== 'done')[0];
   const openTasks = tasks.filter((t) => t.status !== 'done');
   const doneTasks = tasks.filter((t) => t.status === 'done');
   const topTasks = [...openTasks].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || (a.rank || 99) - (b.rank || 99)).slice(0, 5);
@@ -234,8 +271,6 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
     .filter((m) => (m.projectIds || []).includes(project.id) && m.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 4);
-
-  // Early/late stats
   const timedTasks = doneTasks.filter((t) => t.daysEarlyLate != null);
   const earlyTasks = timedTasks.filter((t) => t.daysEarlyLate > 0);
   const lateTasks = timedTasks.filter((t) => t.daysEarlyLate < 0);
@@ -244,138 +279,212 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
   const earlyMs = doneMilestones.filter((m) => m.daysEarlyLate > 0);
   const lateMs = doneMilestones.filter((m) => m.daysEarlyLate < 0);
 
-  return (
-    <div className="stack">
-      <div className="grid g-2">
-        {/* Success criteria */}
-        <SuccessCriteriaCard project={project} />
+  const DEFAULT_TILE_ORDER = ['success-criteria', 'milestones', 'priority-queue', 'open-risks', 'timing', 'meetings', 'notes'];
+  const tileOrder = state.meta.overviewTileOrder || DEFAULT_TILE_ORDER;
+  const [previewOrder, setPreviewOrder] = React.useState(null);
+  const [activeTileId, setActiveTileId] = React.useState(null);
+  const previewRef = React.useRef(null);
+  const dragAllowedRef = React.useRef(false);
+  const dragSrcRef = React.useRef(null);
 
-        {/* Next milestone + compact list */}
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Upcoming milestones</span>
-            <button className="btn btn-ghost btn-sm" onClick={() => onGoto('milestones')}>View all</button>
-          </div>
-          <MilestoneCompactList project={project} milestones={milestones} />
+  const onTileMouseDown = (e) => {
+    const cardHead = e.currentTarget.querySelector('.card-head');
+    const isInteractive = !!e.target.closest('button, select, input, textarea, a');
+    dragAllowedRef.current = !isInteractive && !!cardHead && cardHead.contains(e.target);
+  };
+  const onTileDragStart = (e, id) => {
+    if (!dragAllowedRef.current) { e.preventDefault(); return; }
+    dragSrcRef.current = id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+    const initial = [...tileOrder];
+    previewRef.current = initial;
+    setPreviewOrder(initial);
+    setActiveTileId(id);
+  };
+  const onTileDragEnd = () => {
+    dragSrcRef.current = null;
+    dragAllowedRef.current = false;
+    if (previewRef.current) actions.setMeta({ overviewTileOrder: previewRef.current });
+    previewRef.current = null;
+    setPreviewOrder(null);
+    setActiveTileId(null);
+  };
+  const onTileDragOver = (e, id) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const srcId = dragSrcRef.current;
+    const order = previewRef.current;
+    if (!srcId || srcId === id || !order) return;
+    // Only reorder when cursor is in top 30% or bottom 30% — dead zone prevents oscillation
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = (e.clientY - rect.top) / rect.height;
+    if (pct > 0.3 && pct < 0.7) return;
+    const insertAfter = pct >= 0.7;
+    const srcIdx = order.indexOf(srcId);
+    const next = [...order];
+    next.splice(srcIdx, 1);
+    const tgtIdx = next.indexOf(id);
+    if (tgtIdx === -1) return;
+    next.splice(insertAfter ? tgtIdx + 1 : tgtIdx, 0, srcId);
+    if (next.join() !== order.join()) {
+      previewRef.current = next;
+      setPreviewOrder([...next]);
+    }
+  };
+  const onTileDrop = (e) => { e.preventDefault(); };
+
+  const WIDE_TILES = new Set(['timing', 'meetings', 'notes']);
+
+  const tileContent = {
+    'success-criteria': <SuccessCriteriaCard project={project} />,
+    'milestones': (
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Upcoming milestones</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => onGoto('milestones')}>View all</button>
         </div>
+        <MilestoneCompactList project={project} milestones={milestones} />
       </div>
-
-      {/* Top tasks + risks */}
-      <div className="grid g-2">
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Priority queue</span>
-            <button className="btn btn-ghost btn-sm" onClick={() => onGoto('tasks')}>All tasks</button>
-          </div>
-          {topTasks.length === 0 ? (
-            <EmptyState title="Nothing open" icon="check" />
-          ) : topTasks.map((t) => (
-            <TaskRow key={t.id} task={t} project={project} onOpen={() => onGoto('tasks')} onToggle={actions.toggleTaskDone} />
-          ))}
+    ),
+    'priority-queue': (
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Priority queue</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => onGoto('tasks')}>All tasks</button>
         </div>
-
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Open risks</span>
-            <button className="btn btn-ghost btn-sm" onClick={() => onGoto('risks')}>All risks</button>
+        {topTasks.length === 0 ? (
+          <EmptyState title="Nothing open" icon="check" />
+        ) : topTasks.map((t) => (
+          <TaskRow key={t.id} task={t} project={project} onOpen={() => onGoto('tasks')} onToggle={actions.toggleTaskDone} />
+        ))}
+      </div>
+    ),
+    'open-risks': (
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Open risks</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => onGoto('risks')}>All risks</button>
+        </div>
+        {openRisks.length === 0 ? (
+          <EmptyState title="No open risks" icon="check" />
+        ) : openRisks.slice(0, 4).map((r) => (
+          <div key={r.id} className="risk-row">
+            <div className={`risk-sev risk-sev-${Math.ceil((r.severity * r.likelihood) / 5)}`}>{r.severity * r.likelihood}</div>
+            <div>
+              <div style={{ fontWeight: 500 }}>{r.title}</div>
+              <div className="mono" style={{ color: 'var(--fg-3)', fontSize: 11, marginTop: 2 }}>{r.mitigation}</div>
+            </div>
+            <span />
+            <Pill tone={r.status === 'monitoring' ? 'info' : 'warn'}>{r.status}</Pill>
+            <span />
           </div>
-          {openRisks.length === 0 ? (
-            <EmptyState title="No open risks" icon="check" />
-          ) : openRisks.slice(0, 4).map((r) => (
-            <div key={r.id} className="risk-row">
-              <div className={`risk-sev risk-sev-${Math.ceil((r.severity * r.likelihood) / 5)}`}>{r.severity * r.likelihood}</div>
-              <div>
-                <div style={{ fontWeight: 500 }}>{r.title}</div>
-                <div className="mono" style={{ color: 'var(--fg-3)', fontSize: 11, marginTop: 2 }}>{r.mitigation}</div>
-              </div>
-              <span />
-              <Pill tone={r.status === 'monitoring' ? 'info' : 'warn'}>{r.status}</Pill>
-              <span />
+        ))}
+      </div>
+    ),
+    'timing': timedTasks.length > 0 ? (
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Completion timing</span>
+          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{timedTasks.length} tracked · {doneMilestones.length} milestones</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 1, background: 'var(--line)' }}>
+          {[
+            { label: 'Early', count: earlyTasks.length, ms: earlyMs.length, tone: 'var(--ok)' },
+            { label: 'On time', count: onTimeTasks.length, ms: 0, tone: 'var(--fg-3)' },
+            { label: 'Late', count: lateTasks.length, ms: lateMs.length, tone: 'var(--danger)' },
+          ].map(({ label, count, ms, tone }) => (
+            <div key={label} style={{ background: 'var(--bg-1)', padding: '10px 14px' }}>
+              <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: tone }}>{count}<span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 4 }}>tasks</span></div>
+              {ms > 0 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>{ms} milestone{ms > 1 ? 's' : ''}</div>}
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Completion timing */}
-      {timedTasks.length > 0 && (
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Completion timing</span>
-            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{timedTasks.length} tracked · {doneMilestones.length} milestones</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 1, background: 'var(--line)' }}>
-            {[
-              { label: 'Early', count: earlyTasks.length, ms: earlyMs.length, tone: 'var(--ok)' },
-              { label: 'On time', count: onTimeTasks.length, ms: 0, tone: 'var(--fg-3)' },
-              { label: 'Late', count: lateTasks.length, ms: lateMs.length, tone: 'var(--danger)' },
-            ].map(({ label, count, ms, tone }) => (
-              <div key={label} style={{ background: 'var(--bg-1)', padding: '10px 14px' }}>
-                <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 20, fontWeight: 600, color: tone }}>{count}<span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 4 }}>tasks</span></div>
-                {ms > 0 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>{ms} milestone{ms > 1 ? 's' : ''}</div>}
+        {lateTasks.length > 0 && (
+          <div style={{ padding: '8px 14px', borderTop: '1px solid var(--line)' }}>
+            <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', textTransform: 'uppercase', marginBottom: 6 }}>Late completions</div>
+            {lateTasks.slice(0, 5).map((t) => (
+              <div key={t.id} className="row-flex" style={{ fontSize: 12, gap: 8, marginBottom: 4 }}>
+                <span style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontSize: 11, flexShrink: 0 }}>{Math.abs(t.daysEarlyLate)}d late</span>
+                <span className="truncate">{t.title}</span>
               </div>
             ))}
           </div>
-          {lateTasks.length > 0 && (
-            <div style={{ padding: '8px 14px', borderTop: '1px solid var(--line)' }}>
-              <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', textTransform: 'uppercase', marginBottom: 6 }}>Late completions</div>
-              {lateTasks.slice(0, 5).map((t) => (
-                <div key={t.id} className="row-flex" style={{ fontSize: 12, gap: 8, marginBottom: 4 }}>
-                  <span style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontSize: 11, flexShrink: 0 }}>{Math.abs(t.daysEarlyLate)}d late</span>
-                  <span className="truncate">{t.title}</span>
-                </div>
-              ))}
-            </div>
-          )}
+        )}
+      </div>
+    ) : null,
+    'meetings': upcomingMeetings.length > 0 ? (
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Upcoming meetings</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => onGoto('meetings')}>View all</button>
         </div>
-      )}
-
-      {/* Upcoming meetings */}
-      {upcomingMeetings.length > 0 && (
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Upcoming meetings</span>
-            <button className="btn btn-ghost btn-sm" onClick={() => onGoto('meetings')}>View all</button>
-          </div>
-          {upcomingMeetings.map((m) => {
-            const recLabel = m.recurrence && m.recurrence !== 'none' ? RECURRENCE_LABELS[m.recurrence] : null;
-            const linkedTaskCount = (state.tasks || []).filter((t) => t.meetingId === m.id).length;
-            const linkedDecCount = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision').length;
-            return (
-              <div key={m.id} className="ms-compact-row" style={{ cursor: 'default' }}>
-                <Icon name="clock" size={12} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 13 }} className="truncate">{m.title}</div>
-                  {m.attendees && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 2 }}>{m.attendees}</div>}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                  <div className="row-flex" style={{ gap: 6 }}>
-                    {recLabel && <span className="pill" style={{ fontSize: 9.5, padding: '1px 5px' }}>↻ {recLabel}</span>}
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>{fmtDate(m.date)}</span>
-                  </div>
-                  {(linkedTaskCount > 0 || linkedDecCount > 0) && (
-                    <div className="row-flex" style={{ gap: 6 }}>
-                      {linkedTaskCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedTaskCount} task{linkedTaskCount > 1 ? 's' : ''}</span>}
-                      {linkedDecCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedDecCount} decision{linkedDecCount > 1 ? 's' : ''}</span>}
-                    </div>
-                  )}
-                </div>
+        {upcomingMeetings.map((m) => {
+          const recLabel = m.recurrence && m.recurrence !== 'none' ? RECURRENCE_LABELS[m.recurrence] : null;
+          const linkedTaskCount = (state.tasks || []).filter((t) => t.meetingId === m.id).length;
+          const linkedDecCount = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision').length;
+          return (
+            <div key={m.id} className="ms-compact-row" style={{ cursor: 'default' }}>
+              <Icon name="clock" size={12} style={{ color: 'var(--mtg)', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 13 }} className="truncate">{m.title}</div>
+                {m.attendees && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 2 }}>{m.attendees}</div>}
               </div>
-            );
-          })}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                <div className="row-flex" style={{ gap: 6 }}>
+                  {recLabel && <span className="pill" style={{ fontSize: 9.5, padding: '1px 5px' }}>↻ {recLabel}</span>}
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>{fmtDate(m.date)}</span>
+                </div>
+                {(linkedTaskCount > 0 || linkedDecCount > 0) && (
+                  <div className="row-flex" style={{ gap: 6 }}>
+                    {linkedTaskCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedTaskCount} task{linkedTaskCount > 1 ? 's' : ''}</span>}
+                    {linkedDecCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedDecCount} decision{linkedDecCount > 1 ? 's' : ''}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ) : null,
+    'notes': recentNotes.length > 0 ? (
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Recent notes</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => onGoto('notes')}>All notes</button>
         </div>
-      )}
+        {recentNotes.map((n) => <NoteRow key={n.id} note={n} />)}
+      </div>
+    ) : null,
+  };
 
-      {/* Recent notes */}
-      {recentNotes.length > 0 && (
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Recent notes</span>
-            <button className="btn btn-ghost btn-sm" onClick={() => onGoto('notes')}>All notes</button>
+  const effectiveOrder = previewOrder || tileOrder;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+      {effectiveOrder.map((id) => {
+        const content = tileContent[id];
+        if (!content) return null;
+        const isWide = WIDE_TILES.has(id);
+        const isActive = activeTileId === id;
+        return (
+          <div key={id}
+            draggable
+            onMouseDown={onTileMouseDown}
+            onDragStart={(e) => onTileDragStart(e, id)}
+            onDragEnd={onTileDragEnd}
+            onDragOver={(e) => onTileDragOver(e, id)}
+            onDrop={onTileDrop}
+            style={{
+              gridColumn: isWide ? '1 / -1' : 'auto',
+              opacity: isActive ? 0.4 : 1,
+              transition: 'opacity 0.15s',
+            }}
+          >
+            {content}
           </div>
-          {recentNotes.map((n) => <NoteRow key={n.id} note={n} />)}
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -639,7 +748,7 @@ function MilestonesTab({ project, milestones }) {
 
 function NoteRow({ note }) {
   const isQuestion = note.kind === 'question';
-  const kindTone = { decision: 'accent', question: note.resolved ? 'ok' : 'warn', note: 'neutral' }[note.kind] || 'neutral';
+  const [expanded, setExpanded] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [resolving, setResolving] = React.useState(false);
   const [resolutionText, setResolutionText] = React.useState('');
@@ -650,9 +759,23 @@ function NoteRow({ note }) {
     if (!editing) setDraft(noteToDraft(note));
   }, [note.id, note.title, note.body, note.resolved, editing]);
 
+  const dotColor = note.kind === 'question'
+    ? (note.resolved ? 'var(--ok)' : 'var(--warn)')
+    : note.kind === 'decision' ? 'var(--accent)' : 'var(--fg-3)';
+
+  const statusPill = note.kind === 'decision'
+    ? (note.reversibility === 'irreversible'
+      ? <span className="pill pill-danger" style={{ fontSize: 10, padding: '1px 6px' }}>irreversible</span>
+      : <span className="pill" style={{ fontSize: 10, padding: '1px 6px' }}>reversible</span>)
+    : note.kind === 'question'
+    ? (note.resolved
+      ? <span className="pill pill-ok" style={{ fontSize: 10, padding: '1px 6px' }}>resolved</span>
+      : <span className="pill pill-warn" style={{ fontSize: 10, padding: '1px 6px' }}>open</span>)
+    : null;
+
   if (editing) {
     return (
-      <div className="note-card note-card-editing">
+      <div className="pq-detail" style={{ paddingLeft: 14 }} onClick={(e) => e.stopPropagation()}>
         <div className="field">
           <span className="field-label">Kind</span>
           <div className="seg">
@@ -681,12 +804,12 @@ function NoteRow({ note }) {
         {draft.kind === 'decision' && (
           <>
             <div className="field">
-              <span className="field-label">Context — what made this necessary</span>
-              <textarea className="input" rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="What situation forced the decision?" />
+              <span className="field-label">Context</span>
+              <textarea className="textarea" rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="What situation forced the decision?" />
             </div>
             <div className="field">
               <span className="field-label">Options considered</span>
-              <textarea className="input" rows={2} value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="A) … B) … C) …" />
+              <textarea className="textarea" rows={2} value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="A) … B) … C) …" />
             </div>
           </>
         )}
@@ -694,7 +817,7 @@ function NoteRow({ note }) {
           <>
             <div className="field">
               <span className="field-label">Resolution</span>
-              <textarea className="input" rows={2} value={draft.resolution} onChange={(e) => setDraft({ ...draft, resolution: e.target.value })} placeholder="How was this resolved?" />
+              <textarea className="textarea" rows={2} value={draft.resolution} onChange={(e) => setDraft({ ...draft, resolution: e.target.value })} placeholder="How was this resolved?" />
             </div>
             <div className="field">
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
@@ -708,22 +831,23 @@ function NoteRow({ note }) {
           <span className="field-label">Tags (comma-separated)</span>
           <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
         </div>
-        <div className="modal-foot">
-          <button className="btn btn-danger-ghost" onClick={() => {
-            if (confirm('Delete this note?')) actions.deleteNote(note.id);
-          }}>Delete</button>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => {
-            if (!draft.title) return;
-            actions.updateNote(note.id, {
-              kind: draft.kind, title: draft.title, body: draft.body,
-              context: draft.context, options: draft.options, reversibility: draft.reversibility,
-              resolution: draft.resolution, resolved: draft.resolved,
-              tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean),
-            });
-            setEditing(false);
-          }}>Save</button>
+        <div className="pq-detail-foot" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button className="btn btn-danger-ghost btn-sm" onClick={() => { if (confirm('Delete this note?')) actions.deleteNote(note.id); }}>
+            <Icon name="trash" size={11} /> Delete
+          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn btn-sm" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={() => {
+              if (!draft.title) return;
+              actions.updateNote(note.id, {
+                kind: draft.kind, title: draft.title, body: draft.body,
+                context: draft.context, options: draft.options, reversibility: draft.reversibility,
+                resolution: draft.resolution, resolved: draft.resolved,
+                tags: draft.tags.split(',').map((s) => s.trim()).filter(Boolean),
+              });
+              setEditing(false);
+            }}>Save</button>
+          </div>
         </div>
       </div>
     );
@@ -731,18 +855,17 @@ function NoteRow({ note }) {
 
   if (resolving) {
     return (
-      <div className="note-card note-card-editing" onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 10 }}>{note.title}</div>
+      <div className="pq-detail" style={{ paddingLeft: 14 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 12 }}>{note.title}</div>
         <div className="field">
           <span className="field-label">Resolution</span>
-          <textarea className="input" rows={3} autoFocus value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder="How was this resolved?" />
+          <textarea className="textarea" rows={3} autoFocus value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder="How was this resolved?" />
         </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="pq-detail-foot" style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
           <button className="btn btn-sm" onClick={() => { setResolving(false); setResolutionText(''); }}>Cancel</button>
           <button className="btn btn-primary btn-sm" onClick={() => {
-            actions.updateNote(note.id, { resolved: true, resolution: resolutionText });
-            setResolving(false);
-            setResolutionText('');
+            actions.updateNote(note.id, { resolved: true, resolution: resolutionText, resolvedAt: new Date().toISOString().slice(0, 10) });
+            setResolving(false); setResolutionText('');
           }}>Mark resolved</button>
         </div>
       </div>
@@ -750,38 +873,97 @@ function NoteRow({ note }) {
   }
 
   return (
-    <div className="note-card note-card-hoverable" onClick={() => setEditing(true)}>
-      <div className="note-head">
-        <Pill tone={kindTone}>{isQuestion && note.resolved ? 'resolved' : note.kind}</Pill>
-        <span className="note-title">{note.title}</span>
-        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{fmtDate(note.date)}</span>
-        {isQuestion && !note.resolved && (
-          <button className="btn btn-ghost btn-sm" style={{ padding: '2px 7px', fontSize: 11 }}
-            onClick={(e) => { e.stopPropagation(); setResolving(true); }}>
-            Resolve
-          </button>
-        )}
-        {isQuestion && note.resolved && (
-          <button className="btn btn-ghost btn-sm" style={{ padding: '2px 7px', fontSize: 11 }}
-            onClick={(e) => { e.stopPropagation(); actions.updateNote(note.id, { resolved: false, resolution: '' }); }}>
-            Re-open
-          </button>
-        )}
-        <Icon name="edit" size={11} className="note-edit-icon" />
+    <React.Fragment>
+      <div
+        className={`trow${expanded ? ' trow-expanded' : ''}`}
+        style={{ gridTemplateColumns: '16px 1fr auto 76px 22px', cursor: 'pointer' }}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+        </div>
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>
+          <span className="truncate" style={{ fontWeight: 500, fontSize: 13 }}>{note.title}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span className={`pill pill-${note.kind === 'decision' ? 'accent' : note.kind === 'question' ? 'warn' : 'ghost'}`} style={{ fontSize: 9.5, padding: '1px 6px' }}>{note.kind}</span>
+          {statusPill}
+        </div>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', display: 'flex', alignItems: 'center' }}>
+          {fmtDate(note.date)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={expanded ? 'chevronD' : 'chevronR'} size={10} style={{ color: 'var(--fg-4)' }} />
+        </div>
       </div>
-      {note.body && <div className="note-body">{note.body}</div>}
-      {isQuestion && note.resolved && note.resolution && (
-        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginRight: 6 }}>Resolution</span>
-          {note.resolution}
+      {expanded && (
+        <div className="pq-detail" onClick={(e) => e.stopPropagation()}>
+          <div className="pq-meta-row">
+            <div className="pq-meta">
+              <span className="pq-meta-item">
+                <span className="pill pill-ghost" style={{ fontSize: 10, padding: '1px 6px' }}>{note.kind}</span>
+              </span>
+              {statusPill && (
+                <>
+                  <span className="pq-meta-sep" />
+                  <span className="pq-meta-item">{statusPill}</span>
+                </>
+              )}
+              <span className="pq-meta-sep" />
+              <span className="pq-meta-item mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{fmtDate(note.date)}</span>
+            </div>
+            <button className="btn btn-sm" onClick={() => setEditing(true)}>
+              <Icon name="edit" size={11} /> Edit
+            </button>
+          </div>
+          {note.body && (
+            <div className="pq-section">
+              <div className="pq-section-label">{note.kind === 'decision' ? 'Choice' : 'Body'}</div>
+              <div className="pq-section-val">{note.body}</div>
+            </div>
+          )}
+          {note.kind === 'decision' && note.context && (
+            <div className="pq-section">
+              <div className="pq-section-label">Context</div>
+              <div className="pq-section-val">{note.context}</div>
+            </div>
+          )}
+          {note.kind === 'decision' && note.options && (
+            <div className="pq-section">
+              <div className="pq-section-label">Options considered</div>
+              <div className="pq-section-val">{note.options}</div>
+            </div>
+          )}
+          {isQuestion && note.resolved && (
+            <div className="pq-section">
+              <div className="pq-section-label">Resolution</div>
+              <div className="pq-section-val">
+                {note.resolution || <em style={{ color: 'var(--fg-4)' }}>No resolution text.</em>}
+              </div>
+            </div>
+          )}
+          {(note.tags || []).length > 0 && (
+            <div className="pq-section">
+              <div className="pq-section-label">Tags</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {note.tags.map((t) => <span key={t} className="pill pill-ghost">{t}</span>)}
+              </div>
+            </div>
+          )}
+          <div className="pq-detail-foot" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{fmtDate(note.date)}</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {isQuestion && !note.resolved && (
+                <button className="btn btn-primary btn-sm" onClick={() => setResolving(true)}>Resolve</button>
+              )}
+              {isQuestion && note.resolved && (
+                <button className="btn btn-sm" onClick={() => actions.updateNote(note.id, { resolved: false, resolution: '' })}>Re-open</button>
+              )}
+            </div>
+          </div>
         </div>
       )}
-      {note.tags?.length > 0 && (
-        <div className="note-tags">
-          {note.tags.map((t) => <span key={t} className="tag">#{t}</span>)}
-        </div>
-      )}
-    </div>
+    </React.Fragment>
   );
 }
 
@@ -870,104 +1052,47 @@ function NotesTab({ project, notes }) {
   );
 }
 
-function RiskRow({ risk: r }) {
-  const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState({ title: r.title, severity: r.severity, likelihood: r.likelihood, mitigation: r.mitigation || '' });
 
-  if (editing) {
-    return (
-      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-        <div className="field">
-          <span className="field-label">Title</span>
-          <input className="input" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} autoFocus />
-        </div>
-        <div className="row-2">
-          <div className="field">
-            <span className="field-label">Severity ({draft.severity})</span>
-            <input type="range" min="1" max="5" value={draft.severity} onChange={(e) => setDraft({ ...draft, severity: +e.target.value })} />
-          </div>
-          <div className="field">
-            <span className="field-label">Likelihood ({draft.likelihood})</span>
-            <input type="range" min="1" max="5" value={draft.likelihood} onChange={(e) => setDraft({ ...draft, likelihood: +e.target.value })} />
-          </div>
-        </div>
-        <div className="field">
-          <span className="field-label">Mitigation</span>
-          <textarea className="textarea" value={draft.mitigation} onChange={(e) => setDraft({ ...draft, mitigation: e.target.value })} />
-        </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn btn-danger-ghost btn-sm" onClick={() => { if (confirm('Delete risk?')) actions.deleteRisk(r.id); }}>Delete</button>
-          <button className="btn btn-sm" onClick={() => setEditing(false)}>Cancel</button>
-          <button className="btn btn-primary btn-sm" onClick={() => { actions.updateRisk(r.id, draft); setEditing(false); }}>Save</button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="risk-row risk-row-hoverable" onClick={() => setEditing(true)}>
-      <div className={`risk-sev risk-sev-${Math.ceil((r.severity * r.likelihood) / 5)}`}>{r.severity * r.likelihood}</div>
-      <div>
-        <div style={{ fontWeight: 500 }}>{r.title}</div>
-        {r.mitigation && <div className="mono" style={{ color: 'var(--fg-3)', fontSize: 11, marginTop: 3, lineHeight: 1.4 }}>{r.mitigation}</div>}
-      </div>
-      <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>S{r.severity}·L{r.likelihood}</span>
-      <select className="select" style={{ padding: '3px 6px', fontSize: 11 }} value={r.status}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => actions.updateRisk(r.id, { status: e.target.value })}>
-        <option value="open">Open</option>
-        <option value="monitoring">Monitoring</option>
-        <option value="closed">Closed</option>
-      </select>
-      <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setEditing(true); }}><Icon name="edit" size={12} /></button>
-    </div>
-  );
-}
+function RisksTab({ project, risks, state }) {
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [modalId, setModalId] = React.useState(null);
+  const [showModal, setShowModal] = React.useState(false);
 
-function RisksTab({ project, risks }) {
-  const [adding, setAdding] = React.useState(false);
-  const [draft, setDraft] = React.useState({ title: '', severity: 3, likelihood: 3, mitigation: '' });
+  const RR = window.RiskRow;
+  const RM = window.RiskModal;
+  const modalState = state || { projects: [project], risks, tasks: [], notes: [], meetings: [], blockers: [] };
+
+  const openModal = (id) => { setModalId(id || null); setShowModal(true); };
+  const toggleExpand = (id) => setExpandedId((prev) => prev === id ? null : id);
 
   const open = risks.filter((r) => r.status !== 'closed').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
+  const closed = risks.filter((r) => r.status === 'closed');
+
+  const renderRiskRow = (r) => RR ? (
+    <RR key={r.id} risk={r}
+      project={project}
+      expanded={expandedId === r.id}
+      onToggleExpand={() => toggleExpand(r.id)}
+      onEdit={() => openModal(r.id)} />
+  ) : null;
 
   return (
     <div className="grid g-2">
       <div className="card">
         <div className="card-head">
           <span className="card-head-title">Register</span>
-          <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New risk</button>
+          <button className="btn btn-sm btn-primary" onClick={() => openModal(null)}><Icon name="plus" size={11} /> New risk</button>
         </div>
-        {adding && (
-          <div style={{ padding: 14, borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-            <div className="field">
-              <span className="field-label">Title</span>
-              <input className="input" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-            </div>
-            <div className="row-2">
-              <div className="field">
-                <span className="field-label">Severity ({draft.severity})</span>
-                <input type="range" min="1" max="5" value={draft.severity} onChange={(e) => setDraft({ ...draft, severity: +e.target.value })} />
-              </div>
-              <div className="field">
-                <span className="field-label">Likelihood ({draft.likelihood})</span>
-                <input type="range" min="1" max="5" value={draft.likelihood} onChange={(e) => setDraft({ ...draft, likelihood: +e.target.value })} />
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">Mitigation</span>
-              <textarea className="textarea" value={draft.mitigation} onChange={(e) => setDraft({ ...draft, mitigation: e.target.value })} />
-            </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => setAdding(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => {
-                if (!draft.title) return;
-                actions.addRisk({ ...draft, projectId: project.id });
-                setDraft({ title: '', severity: 3, likelihood: 3, mitigation: '' });
-                setAdding(false);
-              }}>Add</button>
-            </div>
-          </div>
+        {open.length === 0 && closed.length === 0
+          ? <EmptyState title="No risks yet" icon="check" />
+          : null}
+        {open.length > 0 && open.map(renderRiskRow)}
+        {closed.length > 0 && (
+          <>
+            <div className="tgroup-head"><span style={{ color: 'var(--ok)' }}>Closed</span><span className="tgroup-head-count">{closed.length}</span></div>
+            {closed.map(renderRiskRow)}
+          </>
         )}
-        {open.length === 0 ? <EmptyState title="No open risks" icon="check" /> : open.map((r) => <RiskRow key={r.id} risk={r} />)}
       </div>
       <div className="card">
         <div className="card-head">
@@ -978,6 +1103,11 @@ function RisksTab({ project, risks }) {
           <RiskMatrix risks={open} />
         </div>
       </div>
+      {showModal && RM && (
+        <RM riskId={modalId} state={modalState}
+          defaults={{ projectId: project.id }}
+          onClose={() => { setShowModal(false); setModalId(null); }} />
+      )}
     </div>
   );
 }
@@ -1199,193 +1329,72 @@ function MeetingForm({ draft, setDraft, onSave, onCancel, onDelete, autoFocus, p
   );
 }
 
-function MeetingRow({ meeting: m, projects, state }) {
-  const [editing, setEditing] = React.useState(false);
-  const makeDraft = () => ({ title: m.title, date: m.date, attendees: m.attendees || '', notes: m.notes || '', recurrence: m.recurrence || 'none', projectIds: m.projectIds || [] });
-  const [draft, setDraft] = React.useState(makeDraft);
-  const [expandedTaskId, setExpandedTaskId] = React.useState(null);
-  const [expandedDecId, setExpandedDecId] = React.useState(null);
-  const [editingDecId, setEditingDecId] = React.useState(null);
-  const [editDecDraft, setEditDecDraft] = React.useState(null);
-  React.useEffect(() => { if (!editing) setDraft(makeDraft()); }, [m.id, editing]);
-
-  const linkedTasks = state ? (state.tasks || []).filter((t) => t.meetingId === m.id) : [];
-  const linkedDecisions = state ? (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision') : [];
-
-  if (editing) {
-    return (
-      <MeetingForm draft={draft} setDraft={setDraft} autoFocus projects={projects}
-        onSave={() => { actions.updateMeeting(m.id, draft); setEditing(false); }}
-        onCancel={() => setEditing(false)}
-        onDelete={() => { if (confirm('Delete meeting?')) actions.deleteMeeting(m.id); }}
-      />
-    );
-  }
-
-  const recLabel = m.recurrence && m.recurrence !== 'none' ? RECURRENCE_LABELS[m.recurrence] : null;
-  const taggedProjects = (projects || []).filter((p) => (m.projectIds || []).includes(p.id));
-  return (
-    <div className="note-card">
-      <div className="note-head" style={{ cursor: 'pointer' }} onClick={() => setEditing(true)}>
-        <Pill tone="info"><Icon name="clock" size={9} /> meeting</Pill>
-        <span className="note-title">{m.title}</span>
-        {recLabel && <span className="pill" style={{ fontSize: 10, padding: '1px 6px' }}>↻ {recLabel}</span>}
-        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>{fmtDate(m.date)}</span>
-        <Icon name="edit" size={11} className="note-edit-icon" />
-      </div>
-      {m.attendees && <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 4 }}>{m.attendees}</div>}
-      {taggedProjects.length > 1 && (
-        <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
-          {taggedProjects.map((p) => <span key={p.id} className="pcard-code" style={{ fontSize: 9.5, padding: '1px 5px' }}>{p.code}</span>)}
-        </div>
-      )}
-      {m.notes && <div className="note-body">{m.notes}</div>}
-      {(linkedTasks.length > 0 || linkedDecisions.length > 0) && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {linkedTasks.map((t) => {
-            const tp = (projects || []).find((p) => p.id === t.projectId);
-            if (expandedTaskId === t.id) {
-              return (
-                <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}
-                  onClick={(e) => { e.stopPropagation(); setExpandedTaskId(null); }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <PriorityBadge priority={t.priority} />
-                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{t.title}</span>
-                    {tp && <span className="pcard-code" style={{ fontSize: 9.5 }}>{tp.code}</span>}
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--fg-3)', marginBottom: t.description ? 6 : 4 }}>
-                    <span>Status: <strong>{t.status}</strong></span>
-                    {t.dueDate && <span>Due: <strong>{fmtDate(t.dueDate)}</strong></span>}
-                    {t.estimate > 0 && <span>Est: <strong>{t.estimate}h</strong></span>}
-                  </div>
-                  {t.description && <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-line' }}>{t.description}</div>}
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete task?')) { actions.deleteTask(t.id); setExpandedTaskId(null); } }}>Delete</button>
-                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); window.actions.openTask(t.id); }}><Icon name="edit" size={11} /> Edit</button>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 0', cursor: 'pointer' }}
-                onClick={(e) => { e.stopPropagation(); setExpandedTaskId(expandedTaskId === t.id ? null : t.id); }}>
-                <PriorityBadge priority={t.priority} />
-                <span style={{ flex: 1, minWidth: 0 }} className="truncate">{t.title}</span>
-                <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{t.status}</span>
-                <Icon name="chevronD" size={9} style={{ color: 'var(--fg-4)' }} />
-              </div>
-            );
-          })}
-          {linkedDecisions.map((n) => {
-            if (editingDecId === n.id && editDecDraft) {
-              const saveDecField = (patch) => setEditDecDraft({ ...editDecDraft, ...patch });
-              return (
-                <div key={n.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--line)' }} onClick={(e) => e.stopPropagation()}>
-                  <input className="input" style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }} value={editDecDraft.title} autoFocus onChange={(e) => saveDecField({ title: e.target.value })} />
-                  <div className="row-flex" style={{ marginBottom: 10 }}>
-                    <input className="input" type="date" value={editDecDraft.date} onChange={(e) => saveDecField({ date: e.target.value })} style={{ width: 150 }} />
-                    <select className="select" value={editDecDraft.reversibility} onChange={(e) => saveDecField({ reversibility: e.target.value })}>
-                      <option value="reversible">Reversible</option>
-                      <option value="irreversible">Irreversible</option>
-                    </select>
-                  </div>
-                  <div className="field">
-                    <span className="field-label">Choice / summary</span>
-                    <textarea className="input" rows={2} value={editDecDraft.body} onChange={(e) => saveDecField({ body: e.target.value })} />
-                  </div>
-                  <div className="field">
-                    <span className="field-label">Context — what made this necessary</span>
-                    <textarea className="input" rows={3} value={editDecDraft.context} onChange={(e) => saveDecField({ context: e.target.value })} placeholder="What situation forced the decision?" />
-                  </div>
-                  <div className="field">
-                    <span className="field-label">Options considered</span>
-                    <textarea className="input" rows={3} value={editDecDraft.options} onChange={(e) => saveDecField({ options: e.target.value })} placeholder="A) … B) … C) …" />
-                  </div>
-                  <div className="field">
-                    <span className="field-label">Tags</span>
-                    <input className="input" value={editDecDraft.tags} onChange={(e) => saveDecField({ tags: e.target.value })} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 12 }}>
-                    <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete decision?')) { actions.deleteNote(n.id); setEditingDecId(null); setEditDecDraft(null); } }}>
-                      <Icon name="trash" size={11} /> Delete
-                    </button>
-                    <button className="btn btn-sm" onClick={() => { setEditingDecId(null); setEditDecDraft(null); }}>Cancel</button>
-                    <button className="btn btn-primary btn-sm" onClick={() => {
-                      actions.updateNote(n.id, { title: editDecDraft.title, body: editDecDraft.body, context: editDecDraft.context, options: editDecDraft.options, reversibility: editDecDraft.reversibility, date: editDecDraft.date, tags: editDecDraft.tags.split(',').map((t) => t.trim()).filter(Boolean) });
-                      setEditingDecId(null); setEditDecDraft(null); setExpandedDecId(null);
-                    }}>Done</button>
-                  </div>
-                </div>
-              );
-            }
-            if (expandedDecId === n.id) {
-              return (
-                <div key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}
-                  onClick={(e) => { e.stopPropagation(); setExpandedDecId(null); }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    {n.reversibility === 'irreversible'
-                      ? <span className="pill pill-danger" style={{ fontSize: 9.5, flexShrink: 0 }}>irreversible</span>
-                      : <span className="pill pill-accent" style={{ fontSize: 9.5, flexShrink: 0 }}>decision</span>}
-                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{n.title}</span>
-                    <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{fmtDate(n.date)}</span>
-                  </div>
-                  {n.body && <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-line' }}>{n.body}</div>}
-                  {n.context && <div style={{ fontSize: 11, color: 'var(--fg-3)', lineHeight: 1.5, marginBottom: 4 }}><em>Context:</em> {n.context}</div>}
-                  {n.options && <div style={{ fontSize: 11, color: 'var(--fg-3)', lineHeight: 1.5, marginBottom: 4 }}><em>Options:</em> {n.options}</div>}
-                  {(n.tags || []).length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                      {n.tags.map((tag) => <span key={tag} className="pill pill-ghost">{tag}</span>)}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete decision?')) { actions.deleteNote(n.id); setExpandedDecId(null); } }}>Delete</button>
-                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setEditDecDraft({ title: n.title, body: n.body || '', context: n.context || '', options: n.options || '', reversibility: n.reversibility || 'reversible', date: n.date || new Date().toISOString().slice(0, 10), tags: (n.tags || []).join(', ') }); setEditingDecId(n.id); }}><Icon name="edit" size={11} /> Edit</button>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 0', cursor: 'pointer' }}
-                onClick={(e) => { e.stopPropagation(); setExpandedDecId(expandedDecId === n.id ? null : n.id); }}>
-                <span className="pill pill-accent" style={{ fontSize: 9.5, flexShrink: 0 }}>decision</span>
-                <span style={{ flex: 1, minWidth: 0 }} className="truncate">{n.title}</span>
-                <Icon name="chevronD" size={9} style={{ color: 'var(--fg-4)' }} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MeetingsTab({ project, meetings, state }) {
-  const [adding, setAdding] = React.useState(false);
-  const emptyDraft = () => ({ title: '', date: new Date().toISOString().slice(0, 10), attendees: '', notes: '', recurrence: 'none', projectIds: project ? [project.id] : [] });
-  const [draft, setDraft] = React.useState(emptyDraft);
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [editModalId, setEditModalId] = React.useState(null);
+  const [detailModalId, setDetailModalId] = React.useState(null);
+  const [addingModal, setAddingModal] = React.useState(false);
+
+  const MR = window.MeetingRow;
+  const MFM = window.MtgFormModal;
+  const MDM = window.MtgDetailModal;
   const projects = state ? state.projects : (project ? [project] : []);
+  const modalState = state || { meetings, projects, tasks: [], notes: [], blockers: [] };
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const sorted = [...meetings].sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = sorted.filter((m) => m.date >= todayIso);
+  const past = [...sorted.filter((m) => m.date < todayIso)].reverse();
+
+  const renderRow = (m) => MR ? (
+    <MR key={m.id} meeting={m} projects={projects} state={modalState}
+      expanded={expandedId === m.id}
+      onToggleExpand={() => setExpandedId(expandedId === m.id ? null : m.id)}
+      onEdit={() => setEditModalId(m.id)}
+      onOpen={() => setDetailModalId(m.id)}
+      onOpenTask={(id) => window.actions && window.actions.openTask(id)} />
+  ) : null;
 
   return (
     <div className="card">
       <div className="card-head">
         <span className="card-head-title">Meeting notes</span>
-        <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New meeting</button>
+        <button className="btn btn-sm btn-primary" onClick={() => setAddingModal(true)}><Icon name="plus" size={11} /> New meeting</button>
       </div>
-      {adding && (
-        <MeetingForm draft={draft} setDraft={setDraft} autoFocus projects={projects}
-          onSave={() => {
-            if (!draft.title || !draft.date) return;
-            actions.addMeeting(draft);
-            setDraft(emptyDraft());
-            setAdding(false);
-          }}
-          onCancel={() => { setDraft(emptyDraft()); setAdding(false); }}
-        />
-      )}
       {meetings.length === 0
         ? <EmptyState title="No meetings yet" body="Log meeting notes, attendees, and action items here." icon="clock" />
-        : meetings.map((m) => <MeetingRow key={m.id} meeting={m} projects={projects} state={state} />)
+        : (
+          <>
+            {upcoming.length > 0 && (
+              <>
+                <div className="tgroup-head"><span style={{ color: 'var(--mtg, var(--info))' }}>Upcoming</span><span className="tgroup-head-count">{upcoming.length}</span></div>
+                {upcoming.map(renderRow)}
+              </>
+            )}
+            {past.length > 0 && (
+              <>
+                <div className="tgroup-head"><span style={{ color: 'var(--fg-3)' }}>Past</span><span className="tgroup-head-count">{past.length}</span></div>
+                {past.map(renderRow)}
+              </>
+            )}
+          </>
+        )
       }
+      {addingModal && MFM && (
+        <MFM meetingId={null} state={modalState}
+          defaults={{ projectIds: project ? [project.id] : [] }}
+          onClose={() => setAddingModal(false)} />
+      )}
+      {editModalId && MFM && (
+        <MFM meetingId={editModalId} state={modalState}
+          onClose={() => setEditModalId(null)} />
+      )}
+      {detailModalId && MDM && (
+        <MDM meetingId={detailModalId} state={modalState}
+          onOpenProject={null}
+          onOpenTask={(id) => window.actions && window.actions.openTask(id)}
+          onClose={() => setDetailModalId(null)} />
+      )}
     </div>
   );
 }

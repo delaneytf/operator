@@ -2,16 +2,289 @@
 
 const { useState: useStateT2 } = React;
 
+function PQTaskRow({ task, project, onOpen, onToggle, expanded, onToggleExpand, onJumpTo, isDragOver, onDragStart, onDragOver, onDragEnd, onDrop }) {
+  const state = window.getState ? window.getState() : null;
+  const allBlockers = state ? (state.blockers || []).filter((b) => (task.blockers || []).includes(b.id)) : [];
+  const allDeps = state && task.dependsOn
+    ? task.dependsOn.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean)
+    : [];
+  const openDeps = allDeps.filter((t) => t.status !== 'done');
+  const waitingOnThis = state ? state.tasks.filter((t) => (t.dependsOn || []).includes(task.id)) : [];
+  const activeWaiters = waitingOnThis.filter((t) => t.status !== 'done');
+  const [completing, setCompleting] = useStateT2(false);
+
+  const handleCheck = (e) => {
+    e.stopPropagation();
+    if (task.status === 'done') { onToggle(task.id); return; }
+    setCompleting(true);
+  };
+
+  return (
+    <>
+      <div
+        className={`trow ${task.status === 'done' ? 'done' : ''} ${expanded ? 'pq-row-active' : ''} ${isDragOver ? 'pq-drag-over' : ''}`}
+        onClick={onToggleExpand}
+        style={{ cursor: 'pointer' }}
+        data-task-id={task.id}
+        draggable
+        onDragStart={(e) => { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; onDragStart && onDragStart(task.id); }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOver && onDragOver(task.id); }}
+        onDragEnd={() => onDragEnd && onDragEnd()}
+        onDrop={(e) => { e.preventDefault(); onDrop && onDrop(task.id); }}
+      >
+        <span className="trow-drag" style={{ cursor: 'grab' }} />
+        <button className="trow-check" onClick={handleCheck} aria-label="Toggle done">
+          <Icon name="check" size={11} />
+        </button>
+        <PriorityBadge priority={task.priority} />
+        <div className="truncate">
+          <span className="trow-title">{task.title}</span>
+          {allBlockers.length > 0 && (
+            <span className="pill pill-danger" style={{ marginLeft: 8 }}>
+              <Icon name="block" size={10} /> {allBlockers.length}
+            </span>
+          )}
+          {openDeps.length > 0 && (
+            <span className="pill pill-warn" style={{ marginLeft: 8 }}>
+              <Icon name="link" size={10} /> {openDeps.length}
+            </span>
+          )}
+          {activeWaiters.length > 0 && (
+            <span className="pill pill-ok" style={{ marginLeft: 8 }} title={`${activeWaiters.length} task${activeWaiters.length > 1 ? 's' : ''} waiting on this`}>
+              <Icon name="link" size={10} /> {activeWaiters.length} waiting
+            </span>
+          )}
+        </div>
+        {project ? <ProjectChip project={project} /> : <span />}
+        <DueChip date={task.dueDate} small done={task.status === 'done'} />
+        <span className="trow-right">
+          <StatusDot status={task.status} />
+          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{task.estimate}h</span>
+        </span>
+        <span />
+      </div>
+
+      {expanded && (
+        <TaskExpandedDetail task={task} state={state} onEdit={onOpen} onJumpTo={onJumpTo} />
+      )}
+
+      {completing && (
+        <CompletionNoteModal
+          task={task}
+          onConfirm={(note) => { onToggle(task.id, note); setCompleting(false); }}
+          onCancel={() => setCompleting(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function TaskReadOnlyModal({ taskId, state, onClose, onEdit, onJumpTo }) {
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return null;
+
+  const project = state.projects.find((p) => p.id === task.projectId);
+  const allBlockers = (state.blockers || []).filter((b) => (task.blockers || []).includes(b.id));
+  const allDeps = task.dependsOn
+    ? task.dependsOn.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean)
+    : [];
+  const waitingOnThis = state.tasks.filter((t) => (t.dependsOn || []).includes(task.id));
+  const objective = project ? (project.successCriteria || []).find((sc) => sc.id === task.objectiveId) : null;
+  const statusLabel = { todo: 'Todo', 'in-progress': 'In progress', blocked: 'Blocked', done: 'Done' }[task.status] || task.status;
+  const dueDiff = task.dueDate && task.status !== 'done' ? daysFromToday(task.dueDate) : null;
+  const dueColor = dueDiff === null ? 'var(--fg-3)' : dueDiff < 0 ? 'var(--danger)' : dueDiff === 0 ? 'var(--warn)' : 'var(--fg-3)';
+  const timingLabel = task.daysEarlyLate == null ? null
+    : task.daysEarlyLate > 0 ? `${task.daysEarlyLate}d early`
+    : task.daysEarlyLate < 0 ? `${Math.abs(task.daysEarlyLate)}d late`
+    : 'on time';
+  const timingColor = task.daysEarlyLate == null ? 'var(--fg-4)'
+    : task.daysEarlyLate >= 0 ? 'var(--ok)'
+    : 'var(--danger)';
+
+  const DepItem = ({ d }) => {
+    const done = d.status === 'done';
+    const statusColor = { done: 'var(--ok)', 'in-progress': 'var(--info)', blocked: 'var(--danger)', todo: 'var(--fg-3)' }[d.status] || 'var(--fg-3)';
+    const sLabel = { done: 'Done', 'in-progress': 'In progress', blocked: 'Blocked', todo: 'Todo' }[d.status] || d.status;
+    const iconClass = done ? 'pq-list-icon-ok' : d.status === 'in-progress' ? 'pq-list-icon-info' : 'pq-list-icon-warn';
+    return (
+      <div className="pq-list-item pq-list-item-link" onClick={() => onJumpTo(d.id)}>
+        <span className={`pq-list-icon ${iconClass}`}>
+          <Icon name="link" size={11} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: done ? 'var(--fg-4)' : 'var(--fg-1)', textDecoration: done ? 'line-through' : 'none' }}>{d.title}</span>
+          <PriorityBadge priority={d.priority} />
+          <span className="mono" style={{ fontSize: 11, color: statusColor, fontWeight: 600 }}>{sLabel}</span>
+        </div>
+        <Icon name="chevronR" size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+      </div>
+    );
+  };
+
+  return (
+    <Modal open={true} onClose={onClose} title={
+      <span className="row-flex" style={{ gap: 8 }}>
+        {project && <ProjectChip project={project} />}
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{task.id.toUpperCase()}</span>
+      </span>
+    } wide>
+      {/* Title */}
+      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, color: task.status === 'done' ? 'var(--fg-3)' : 'var(--fg)', textDecoration: task.status === 'done' ? 'line-through' : 'none' }}>
+        {task.title}
+      </div>
+
+      {/* Meta strip */}
+      <div className="pq-meta" style={{ paddingBottom: 12, borderBottom: '1px solid var(--line)', marginBottom: 14 }}>
+        <span className="pq-meta-item"><StatusDot status={task.status} /><span>{statusLabel}</span></span>
+        <span className="pq-meta-sep" />
+        <PriorityBadge priority={task.priority} />
+        {task.estimate > 0 && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>{task.estimate}h est.</span></>}
+        {task.createdAt && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>Created {fmtDate(task.createdAt)}</span></>}
+        {task.status === 'done' && task.completedAt && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>Completed {fmtDate(task.completedAt)}</span></>}
+        {task.dueDate && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: dueColor }}>Due {fmtDate(task.dueDate)}</span></>}
+        {task.status === 'done' && timingLabel && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: timingColor, fontWeight: 600 }}>{timingLabel}</span></>}
+        <span className="pq-meta-sep" />
+        <span className="pill pill-ghost" style={{ textTransform: 'capitalize' }}>{task.source || 'planned'}</span>
+      </div>
+
+      {/* Description */}
+      <div className="pq-section">
+        <div className="pq-section-label">Description</div>
+        {task.description
+          ? <div className="pq-section-val">{task.description}</div>
+          : <div className="pq-section-val" style={{ color: 'var(--fg-4)', fontStyle: 'italic' }}>No description</div>
+        }
+      </div>
+
+      {/* Objective */}
+      {objective && (
+        <div className="pq-section">
+          <div className="pq-section-label">Objective</div>
+          <div className="pq-section-val">
+            {objective.text}
+            {objective.target && <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 8 }}>{objective.current} → {objective.target}</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Resolution */}
+      {task.status === 'done' && task.completionNote && (
+        <div className="pq-section">
+          <div className="pq-section-label">Resolution</div>
+          <div className="pq-section-val">{task.completionNote}</div>
+        </div>
+      )}
+
+      {/* Dev blockers (Jira) */}
+      {allBlockers.filter((b) => !!b.jiraKey).length > 0 && (
+        <div className="pq-section">
+          <div className="pq-section-label">Dev dependency</div>
+          {allBlockers.filter((b) => !!b.jiraKey).map((b) => (
+            <div key={b.id} className="pq-list-item">
+              <span className="pq-list-icon pq-list-icon-accent"><Icon name="ext" size={11} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500 }}>{b.description}</div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
+                  <span style={{ color: 'var(--accent)' }}>{b.jiraKey}</span> · {fmtRelative(b.since)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Waiting on */}
+      {allBlockers.filter((b) => !b.jiraKey).length > 0 && (
+        <div className="pq-section">
+          <div className="pq-section-label">Waiting on</div>
+          {allBlockers.filter((b) => !b.jiraKey).map((b) => (
+            <div key={b.id} className="pq-list-item">
+              <span className="pq-list-icon pq-list-icon-warn"><Icon name="clock" size={11} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500 }}>{b.description}</div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
+                  {b.waitingOn !== '—' ? b.waitingOn : ''}{b.waitingOn !== '—' ? ' · ' : ''}{fmtRelative(b.since)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Prerequisites */}
+      {allDeps.length > 0 && (
+        <div className="pq-section">
+          <div className="pq-section-label">Prerequisites</div>
+          {allDeps.map((d) => <DepItem key={d.id} d={d} />)}
+        </div>
+      )}
+
+      {/* Required by */}
+      {waitingOnThis.length > 0 && (
+        <div className="pq-section">
+          <div className="pq-section-label">Required by</div>
+          {waitingOnThis.map((d) => <DepItem key={d.id} d={d} />)}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid var(--line)', marginTop: 8 }}>
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
+          Updated {fmtRelative(task.updatedAt)}
+        </span>
+        <div className="row-flex">
+          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn btn-sm" onClick={() => onEdit(task.id)}><Icon name="edit" size={11} /> Edit</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function Today({ state, onOpenTask, onOpenProject }) {
   const [showAdd, setShowAdd] = useStateT2(false);
   const [planning, setPlanning] = useStateT2(false);
   const [endDayModal, setEndDayModal] = useStateT2(false);
+  const [collapsed, setCollapsed] = useStateT2({ overdue: false, today: false, soon: false, remaining: true });
+  const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const [expandedTaskId, setExpandedTaskId] = useStateT2(null);
+  const [readOnlyTaskId, setReadOnlyTaskId] = useStateT2(null);
+  const toggleExpand = (id) => setExpandedTaskId((prev) => (prev === id ? null : id));
+  const jumpTo = (id) => setReadOnlyTaskId(id);
+
+  const dragSrcId = React.useRef(null);
+  const [dragOverId, setDragOverId] = useStateT2(null);
+
+  const sortByPQOrder = (tasks) => {
+    const order = state.meta.pqOrder || [];
+    return [...tasks].sort((a, b) => {
+      const ai = order.indexOf(a.id);
+      const bi = order.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  };
+
+  const reorderSection = (sectionTasks, dropTargetId) => {
+    const srcId = dragSrcId.current;
+    if (!srcId || srcId === dropTargetId) return;
+    const ids = sectionTasks.map((t) => t.id);
+    const fromIdx = ids.indexOf(srcId);
+    const toIdx = ids.indexOf(dropTargetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    ids.splice(fromIdx, 1);
+    ids.splice(toIdx, 0, srcId);
+    const otherIds = (state.meta.pqOrder || []).filter((id) => !ids.includes(id));
+    actions.setMeta({ pqOrder: [...ids, ...otherIds] });
+  };
 
   const prioritized = todayTasks(state, 50);
-  const overdue = prioritized.filter((t) => t._due !== null && t._due < 0);
-  const dueToday = prioritized.filter((t) => t._due === 0);
-  const soon = prioritized.filter((t) => t._due !== null && t._due > 0 && t._due <= 2);
-  const laterFocus = prioritized.filter((t) => !overdue.includes(t) && !dueToday.includes(t) && !soon.includes(t)).slice(0, 25);
+  const overdue = sortByPQOrder(prioritized.filter((t) => t._due !== null && t._due < 0));
+  const dueToday = sortByPQOrder(prioritized.filter((t) => t._due === 0));
+  const soon = sortByPQOrder(prioritized.filter((t) => t._due !== null && t._due > 0 && t._due <= 2));
+  const laterFocus = sortByPQOrder(prioritized.filter((t) => !prioritized.filter((x) => x._due !== null && x._due < 0).includes(t) && !prioritized.filter((x) => x._due === 0).includes(t) && !prioritized.filter((x) => x._due !== null && x._due > 0 && x._due <= 2).includes(t))).slice(0, 25);
 
   const plannedIds = state.meta.plannedToday || [];
   const plannedTasks = plannedIds.map((id) => state.tasks.find((t) => t.id === id)).filter(Boolean);
@@ -269,36 +542,46 @@ function Today({ state, onOpenTask, onOpenProject }) {
             </button>
           </div>
         </div>
-        {showAdd && (
-          <QuickAddTask
-            projects={state.projects}
-            onAdd={(t) => actions.addTask(t)}
-            onCancel={() => setShowAdd(false)}
-          />
-        )}
+        {showAdd && <TaskModal taskId={null} state={state} onClose={() => setShowAdd(false)} />}
         <div>
           {overdue.length > 0 && (
             <>
-              <div className="tgroup-head"><span style={{ color: 'var(--danger)' }}>Overdue</span><span className="tgroup-head-count">{overdue.length}</span></div>
-              {overdue.map((t) => <TaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} showProject />)}
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('overdue')}>
+                <Icon name={collapsed.overdue ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span style={{ color: 'var(--danger)' }}>Overdue</span>
+                <span className="tgroup-head-count">{overdue.length}</span>
+              </div>
+              {!collapsed.overdue && overdue.map((t) => <PQTaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} expanded={expandedTaskId === t.id} onToggleExpand={() => toggleExpand(t.id)} onJumpTo={jumpTo} isDragOver={dragOverId === t.id} onDragStart={(id) => { dragSrcId.current = id; }} onDragOver={(id) => setDragOverId(id)} onDragEnd={() => { dragSrcId.current = null; setDragOverId(null); }} onDrop={(id) => { reorderSection(overdue, id); setDragOverId(null); }} />)}
             </>
           )}
           {dueToday.length > 0 && (
             <>
-              <div className="tgroup-head"><span>Due today</span><span className="tgroup-head-count">{dueToday.length}</span></div>
-              {dueToday.map((t) => <TaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} showProject />)}
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('today')}>
+                <Icon name={collapsed.today ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span>Due today</span>
+                <span className="tgroup-head-count">{dueToday.length}</span>
+              </div>
+              {!collapsed.today && dueToday.map((t) => <PQTaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} expanded={expandedTaskId === t.id} onToggleExpand={() => toggleExpand(t.id)} onJumpTo={jumpTo} isDragOver={dragOverId === t.id} onDragStart={(id) => { dragSrcId.current = id; }} onDragOver={(id) => setDragOverId(id)} onDragEnd={() => { dragSrcId.current = null; setDragOverId(null); }} onDrop={(id) => { reorderSection(dueToday, id); setDragOverId(null); }} />)}
             </>
           )}
           {soon.length > 0 && (
             <>
-              <div className="tgroup-head"><span>Next 48 hours</span><span className="tgroup-head-count">{soon.length}</span></div>
-              {soon.map((t) => <TaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} showProject />)}
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('soon')}>
+                <Icon name={collapsed.soon ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span>Next 48 hours</span>
+                <span className="tgroup-head-count">{soon.length}</span>
+              </div>
+              {!collapsed.soon && soon.map((t) => <PQTaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} expanded={expandedTaskId === t.id} onToggleExpand={() => toggleExpand(t.id)} onJumpTo={jumpTo} isDragOver={dragOverId === t.id} onDragStart={(id) => { dragSrcId.current = id; }} onDragOver={(id) => setDragOverId(id)} onDragEnd={() => { dragSrcId.current = null; setDragOverId(null); }} onDrop={(id) => { reorderSection(soon, id); setDragOverId(null); }} />)}
             </>
           )}
           {laterFocus.length > 0 && (
             <>
-              <div className="tgroup-head"><span>Remaining tasks</span><span className="tgroup-head-count">{laterFocus.length}</span></div>
-              {laterFocus.map((t) => <TaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} showProject />)}
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('remaining')}>
+                <Icon name={collapsed.remaining ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span>Remaining tasks</span>
+                <span className="tgroup-head-count">{laterFocus.length}</span>
+              </div>
+              {!collapsed.remaining && laterFocus.map((t) => <PQTaskRow key={t.id} task={t} project={state.projects.find((p) => p.id === t.projectId)} onOpen={onOpenTask} onToggle={actions.toggleTaskDone} expanded={expandedTaskId === t.id} onToggleExpand={() => toggleExpand(t.id)} onJumpTo={jumpTo} isDragOver={dragOverId === t.id} onDragStart={(id) => { dragSrcId.current = id; }} onDragOver={(id) => setDragOverId(id)} onDragEnd={() => { dragSrcId.current = null; setDragOverId(null); }} onDrop={(id) => { reorderSection(laterFocus, id); setDragOverId(null); }} />)}
             </>
           )}
           {overdue.length + dueToday.length + soon.length + laterFocus.length === 0 && (
@@ -344,6 +627,15 @@ function Today({ state, onOpenTask, onOpenProject }) {
 
       {planning && <PlanMyDayModal state={state} onClose={() => setPlanning(false)} />}
       {endDayModal && <EndDayModal state={state} onClose={() => setEndDayModal(false)} />}
+      {readOnlyTaskId && (
+        <TaskReadOnlyModal
+          taskId={readOnlyTaskId}
+          state={state}
+          onClose={() => setReadOnlyTaskId(null)}
+          onEdit={(id) => { setReadOnlyTaskId(null); onOpenTask(id); }}
+          onJumpTo={jumpTo}
+        />
+      )}
     </div>
   );
 }
@@ -461,4 +753,4 @@ function EndDayModal({ state, onClose }) {
   );
 }
 
-Object.assign(window, { Today, PlanMyDayModal, EndDayModal });
+Object.assign(window, { Today, PlanMyDayModal, EndDayModal, TaskReadOnlyModal });

@@ -184,15 +184,16 @@ function StatusDot({ status }) {
   return <span className={`sdot sdot-${status}`} title={STATUS_LABEL[status]} />;
 }
 
-function DueChip({ date, small }) {
+function DueChip({ date, small, done }) {
   const diff = daysFromToday(date);
   if (diff === null) return <span className={`due due-empty ${small ? 'due-sm' : ''}`}>—</span>;
   let tone = 'neutral';
-  if (diff < 0) tone = 'danger';
-  else if (diff === 0) tone = 'warn';
-  else if (diff <= 2) tone = 'warn';
-  else if (diff <= 7) tone = 'accent';
-  return <span className={`due due-${tone} ${small ? 'due-sm' : ''}`}>{fmtRelative(date)}</span>;
+  if (!done) {
+    if (diff < 0) tone = 'danger';
+    else if (diff <= 2) tone = 'warn';
+    else if (diff <= 7) tone = 'accent';
+  }
+  return <span className={`due due-${tone} ${small ? 'due-sm' : ''}`}>{done ? fmtDate(date) : fmtRelative(date)}</span>;
 }
 
 function ProjectChip({ project, onClick }) {

@@ -229,6 +229,7 @@ const actions = {
   addNote(n) {
     const note = { id: uid('n'), kind: 'decision', date: todayStr(), tags: [], ...n };
     setState((s) => ({ ...s, notes: [note, ...s.notes] }));
+    return note;
   },
   updateNote(id, patch) {
     setState((s) => ({ ...s, notes: s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
@@ -250,6 +251,7 @@ const actions = {
       ...r,
     };
     setState((s) => ({ ...s, risks: [...s.risks, risk] }));
+    return risk;
   },
   updateRisk(id, patch) {
     setState((s) => ({ ...s, risks: s.risks.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
