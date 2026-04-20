@@ -82,9 +82,15 @@ function App() {
   };
   const onDragEnd = () => { setDragId(null); setDragOverId(null); };
 
+  const isElectronMac = window.__ELECTRON__ && window.__PLATFORM__ === 'darwin';
+
   return (
     <div className="app">
       <aside className="sidebar">
+        {/* Spacer that clears macOS traffic lights and acts as a drag handle */}
+        {isElectronMac && (
+          <div style={{ height: 28, marginTop: -12, marginLeft: -10, marginRight: -10, flexShrink: 0, WebkitAppRegion: 'drag' }} />
+        )}
         <div className="sb-brand">
           <div className="sb-brand-mark">◎</div>
           <div style={{ fontFamily: 'Helvetica' }}>
@@ -209,8 +215,8 @@ function App() {
       </aside>
 
       <main className="main">
-        <div className="topbar">
-          <div className="topbar-left">
+        <div className="topbar" style={isElectronMac ? { WebkitAppRegion: 'drag' } : undefined}>
+          <div className="topbar-left" style={isElectronMac ? { WebkitAppRegion: 'no-drag' } : undefined}>
             <div className="crumbs">
               {state.meta.activeView === 'today' && <strong>Today <span style={{ fontWeight: 400, color: 'var(--fg-4)' }}>· {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></strong>}
               {state.meta.activeView === 'portfolio' && <strong>Portfolio</strong>}
@@ -235,7 +241,7 @@ function App() {
               )}
             </div>
           </div>
-          <div className="topbar-right">
+          <div className="topbar-right" style={isElectronMac ? { WebkitAppRegion: 'no-drag' } : undefined}>
             <div className="topbar-search">
               <Icon name="search" size={12} />
               <input

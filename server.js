@@ -5,13 +5,46 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'data', 'data.json');
+// In packaged Electron app, OPERATOR_DATA_DIR points to writable userData.
+// In dev, falls back to ./data/ in the project root.
+const DATA_DIR    = process.env.OPERATOR_DATA_DIR || path.join(__dirname, 'data');
+const DATA_FILE   = path.join(DATA_DIR, 'data.json');
+const TOKENS_FILE = path.join(DATA_DIR, 'tokens.json');
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static(__dirname));
 
-// Ensure data directory exists
-fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+// Ensure data directory exists (uses writable userData in packaged app)
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// ── Token store helpers ───────────────────────────────────────────────────────
+
+function readTokens() {
+  try {
+    if (!fs.existsSync(TOKENS_FILE)) return {};
+    return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
+  } catch { return {}; }
+}
+
+function writeTokens(data) {
+  fs.writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2));
+}
+
+function getToken(provider) {
+  return readTokens()[provider] || null;
+}
+
+function setToken(provider, credentials) {
+  const tokens = readTokens();
+  tokens[provider] = { ...credentials, savedAt: new Date().toISOString() };
+  writeTokens(tokens);
+}
+
+function deleteToken(provider) {
+  const tokens = readTokens();
+  delete tokens[provider];
+  writeTokens(tokens);
+}
 
 // ── Serve app ─────────────────────────────────────────────────────────────────
 
@@ -42,17 +75,59 @@ app.post('/api/data', (req, res) => {
   }
 });
 
+// ── Auth: credential storage ──────────────────────────────────────────────────
+
+app.get('/api/auth/status', (req, res) => {
+  const tokens = readTokens();
+  const env = process.env;
+  const status = {};
+
+  const providers = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai'];
+  providers.forEach((p) => {
+    const t = tokens[p];
+    status[p] = { connected: !!t, savedAt: t?.savedAt || null };
+    if (t?.email) status[p].email = t.email;
+    if (t?.site)  status[p].site  = t.site;
+    if (t?.user)  status[p].user  = t.user;
+  });
+
+  // Also check env fallbacks for Jira / Confluence / Claude
+  if (!status.jira.connected && env.JIRA_API_TOKEN)        status.jira        = { connected: true, source: 'env' };
+  if (!status.confluence.connected && env.CONFLUENCE_API_TOKEN) status.confluence = { connected: true, source: 'env' };
+  if (!status.claude.connected && env.ANTHROPIC_API_KEY)   status.claude      = { connected: true, source: 'env' };
+
+  res.json(status);
+});
+
+app.post('/api/auth/credentials', (req, res) => {
+  const { provider, credentials } = req.body;
+  if (!provider || !credentials) return res.status(400).json({ error: 'provider and credentials required' });
+  const allowed = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai'];
+  if (!allowed.includes(provider)) return res.status(400).json({ error: 'unknown provider' });
+  setToken(provider, credentials);
+  res.json({ ok: true });
+});
+
+app.delete('/api/auth/:provider', (req, res) => {
+  deleteToken(req.params.provider);
+  res.json({ ok: true });
+});
+
 // ── Jira sync ─────────────────────────────────────────────────────────────────
 
 app.post('/api/jira/sync', async (req, res) => {
-  const { JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN } = process.env;
-  if (!JIRA_BASE_URL || !JIRA_EMAIL || !JIRA_API_TOKEN) {
-    return res.status(400).json({ error: 'Jira credentials not set in .env (JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN)' });
+  const t = getToken('jira');
+  const email    = t?.email    || process.env.JIRA_EMAIL;
+  const token    = t?.token    || process.env.JIRA_API_TOKEN;
+  const baseUrl  = t?.site     || process.env.JIRA_BASE_URL;
+
+  if (!baseUrl || !email || !token) {
+    return res.status(400).json({ error: 'Jira credentials not configured. Set them in Integrations or add JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN to .env' });
   }
 
-  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64');
+  const auth = Buffer.from(`${email}:${token}`).toString('base64');
   const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json' };
-  const base = JIRA_BASE_URL.replace(/\/$/, '');
+  const base = baseUrl.replace(/\/$/, '');
 
   try {
     // Fetch projects
@@ -137,14 +212,18 @@ app.post('/api/jira/sync', async (req, res) => {
 // ── Confluence sync ───────────────────────────────────────────────────────────
 
 app.post('/api/confluence/sync', async (req, res) => {
-  const { CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN } = process.env;
-  if (!CONFLUENCE_BASE_URL || !CONFLUENCE_EMAIL || !CONFLUENCE_API_TOKEN) {
-    return res.status(400).json({ error: 'Confluence credentials not set in .env (CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN)' });
+  const t = getToken('confluence');
+  const email   = t?.email   || process.env.CONFLUENCE_EMAIL;
+  const token   = t?.token   || process.env.CONFLUENCE_API_TOKEN;
+  const baseUrl = t?.site    || process.env.CONFLUENCE_BASE_URL;
+
+  if (!baseUrl || !email || !token) {
+    return res.status(400).json({ error: 'Confluence credentials not configured. Set them in Integrations or add CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN to .env' });
   }
 
-  const auth = Buffer.from(`${CONFLUENCE_EMAIL}:${CONFLUENCE_API_TOKEN}`).toString('base64');
+  const auth = Buffer.from(`${email}:${token}`).toString('base64');
   const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json' };
-  const base = CONFLUENCE_BASE_URL.replace(/\/$/, '');
+  const base = baseUrl.replace(/\/$/, '');
 
   try {
     // Fetch spaces
@@ -193,34 +272,159 @@ app.post('/api/confluence/sync', async (req, res) => {
   }
 });
 
+// ── Slack sync ────────────────────────────────────────────────────────────────
+
+app.post('/api/slack/sync', async (req, res) => {
+  const t = getToken('slack');
+  const botToken = t?.token || process.env.SLACK_BOT_TOKEN;
+  if (!botToken) return res.status(400).json({ error: 'Slack bot token not configured. Set it in Integrations.' });
+
+  const headers = { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' };
+
+  try {
+    // Fetch public channels
+    const chanRes = await fetch('https://slack.com/api/conversations.list?limit=200&exclude_archived=true&types=public_channel', { headers });
+    const chanData = await chanRes.json();
+    if (!chanData.ok) throw new Error(`Slack channels: ${chanData.error}`);
+
+    const channels = (chanData.channels || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      topic: c.topic?.value || '',
+      memberCount: c.num_members || 0,
+      isPrivate: c.is_private || false,
+    }));
+
+    // Fetch recent messages from the first 5 channels
+    const msgFetches = channels.slice(0, 5).map((ch) =>
+      fetch(`https://slack.com/api/conversations.history?channel=${ch.id}&limit=20`, { headers })
+        .then((r) => r.json())
+        .then((d) => (d.messages || []).filter((m) => m.type === 'message' && m.text).map((m) => ({
+          channelId: ch.id,
+          channelName: ch.name,
+          ts: m.ts,
+          text: m.text.slice(0, 500),
+          user: m.user || '',
+        })))
+        .catch(() => [])
+    );
+    const msgArrays = await Promise.all(msgFetches);
+    const messages = msgArrays.flat().sort((a, b) => parseFloat(b.ts) - parseFloat(a.ts)).slice(0, 100);
+
+    res.json({ slackChannels: channels, slackMessages: messages });
+  } catch (e) {
+    console.error('[slack] sync error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Microsoft Graph sync ──────────────────────────────────────────────────────
+
+app.post('/api/microsoft/sync', async (req, res) => {
+  const t = getToken('teams') || getToken('outlook');
+  const accessToken = t?.accessToken || process.env.MICROSOFT_ACCESS_TOKEN;
+  if (!accessToken) return res.status(400).json({ error: 'Microsoft access token not configured. Connect via Integrations.' });
+
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  const now = new Date().toISOString();
+  const future = new Date(Date.now() + 30 * 86400000).toISOString();
+
+  try {
+    // Calendar events
+    const eventsRes = await fetch(
+      `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${now}&endDateTime=${future}&$top=50&$select=subject,start,end,organizer,attendees,bodyPreview,isOnlineMeeting`,
+      { headers }
+    );
+    const eventsData = await eventsRes.json();
+    if (eventsData.error) throw new Error(`Graph calendar: ${eventsData.error.message}`);
+
+    const calendarEvents = (eventsData.value || []).map((e) => ({
+      id: `ms-${e.id?.slice(0, 20) || Math.random()}`,
+      title: e.subject || '',
+      start: e.start?.dateTime?.slice(0, 16) || '',
+      end:   e.end?.dateTime?.slice(0, 16) || '',
+      organizer: e.organizer?.emailAddress?.name || '',
+      attendees: (e.attendees || []).map((a) => a.emailAddress?.name || '').filter(Boolean),
+      body: e.bodyPreview?.slice(0, 300) || '',
+      isOnline: e.isOnlineMeeting || false,
+    }));
+
+    // Recent emails
+    const mailRes = await fetch(
+      'https://graph.microsoft.com/v1.0/me/messages?$top=30&$select=subject,from,receivedDateTime,bodyPreview,isRead&$orderby=receivedDateTime desc',
+      { headers }
+    );
+    const mailData = await mailRes.json();
+    const emails = (mailData.value || []).map((m) => ({
+      id: `ml-${m.id?.slice(0, 20) || Math.random()}`,
+      subject: m.subject || '',
+      from: m.from?.emailAddress?.name || '',
+      received: (m.receivedDateTime || '').slice(0, 10),
+      preview: m.bodyPreview?.slice(0, 200) || '',
+      isRead: m.isRead || false,
+    }));
+
+    res.json({ calendarEvents, emails });
+  } catch (e) {
+    console.error('[microsoft] sync error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── AI chat ───────────────────────────────────────────────────────────────────
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { ANTHROPIC_API_KEY, ANTHROPIC_MODEL } = process.env;
-  if (!ANTHROPIC_API_KEY) {
-    return res.status(400).json({ error: 'ANTHROPIC_API_KEY not set in .env' });
-  }
+  const { system, messages, provider: reqProvider } = req.body;
 
-  const { system, messages } = req.body;
+  // Determine which AI provider to use
+  const claudeToken = getToken('claude');
+  const openaiToken = getToken('openai');
+  const anthropicKey = claudeToken?.apiKey || process.env.ANTHROPIC_API_KEY;
+  const openaiKey    = openaiToken?.apiKey || process.env.OPENAI_API_KEY;
+
+  // Use requested provider, fall back to what's available
+  const provider = reqProvider || (anthropicKey ? 'claude' : openaiKey ? 'openai' : null);
+
+  if (!provider) return res.status(400).json({ error: 'No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env, or connect in Integrations.' });
+
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL || 'claude-opus-4-7',
-        max_tokens: 1024,
-        system: system || 'You are a helpful project management assistant.',
-        messages,
-      }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || `Anthropic API error ${response.status}`);
-    res.json({ text: data.content[0].text });
+    if (provider === 'openai') {
+      if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: openaiToken?.model || process.env.OPENAI_MODEL || 'gpt-4o',
+          messages: [
+            { role: 'system', content: system || 'You are a helpful project management assistant.' },
+            ...messages,
+          ],
+          max_tokens: 1024,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || `OpenAI error ${response.status}`);
+      res.json({ text: data.choices[0].message.content, provider: 'openai' });
+    } else {
+      if (!anthropicKey) return res.status(400).json({ error: 'Anthropic API key not configured.' });
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: claudeToken?.model || process.env.ANTHROPIC_MODEL || 'claude-opus-4-7',
+          max_tokens: 1024,
+          system: system || 'You are a helpful project management assistant.',
+          messages,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || `Anthropic API error ${response.status}`);
+      res.json({ text: data.content[0].text, provider: 'claude' });
+    }
   } catch (e) {
     console.error('[ai] chat error:', e.message);
     res.status(500).json({ error: e.message });
@@ -262,13 +466,16 @@ function stripHtml(html) {
 
 app.listen(PORT, () => {
   console.log(`\n  Operator running at http://localhost:${PORT}\n`);
-  const missing = [];
-  if (!process.env.JIRA_API_TOKEN) missing.push('JIRA_API_TOKEN');
-  if (!process.env.CONFLUENCE_API_TOKEN) missing.push('CONFLUENCE_API_TOKEN');
-  if (!process.env.ANTHROPIC_API_KEY) missing.push('ANTHROPIC_API_KEY');
-  if (missing.length) {
-    console.log(`  ⚠  Not configured (add to .env): ${missing.join(', ')}\n`);
-  } else {
-    console.log(`  ✓  All integrations configured\n`);
-  }
+  const tokens = readTokens();
+  const check = (envKey, tokenProvider, label) => {
+    if (process.env[envKey] || tokens[tokenProvider]) console.log(`  ✓  ${label}`);
+    else console.log(`  ·  ${label} (not configured)`);
+  };
+  check('ANTHROPIC_API_KEY', 'claude',      'Claude AI');
+  check('OPENAI_API_KEY',    'openai',      'OpenAI');
+  check('JIRA_API_TOKEN',    'jira',        'Jira');
+  check('CONFLUENCE_API_TOKEN', 'confluence', 'Confluence');
+  check('SLACK_BOT_TOKEN',   'slack',       'Slack');
+  check('MICROSOFT_ACCESS_TOKEN', 'teams',  'Microsoft (Teams/Outlook)');
+  console.log('');
 });

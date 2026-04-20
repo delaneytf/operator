@@ -6,8 +6,41 @@ function IntegrationsView({ state }) {
   const getIntg = (key) => ({ connected: false, access: 'read', ...( integrations[key] || {}) });
 
   const [connecting, setConnecting] = React.useState(null);
-  const [apiKeyInput, setApiKeyInput] = React.useState({});  // { [key]: string }
+  const [apiKeyInput, setApiKeyInput] = React.useState({});      // { [key]: string }
+  const [atlassianInput, setAtlassianInput] = React.useState({}); // { [key]: {site,email,token} }
   const [expandedKey, setExpandedKey] = React.useState(null);
+  const [serverStatus, setServerStatus] = React.useState({});
+
+  // Load server auth status on mount
+  React.useEffect(() => {
+    fetch('/api/auth/status')
+      .then(r => r.ok ? r.json() : {})
+      .then(status => {
+        setServerStatus(status);
+        // Merge server-connected providers into local state
+        const patch = {};
+        Object.entries(status).forEach(([provider, s]) => {
+          if (s.connected && !integrations[provider]?.connected) {
+            const now = new Date().toISOString().slice(0, 10);
+            patch[provider] = {
+              connected: true,
+              user: s.email || s.user || (s.source === 'env' ? '.env' : null),
+              site: s.site || null,
+              connectedAt: s.savedAt?.slice(0, 10) || now,
+              syncedAt: s.savedAt?.slice(0, 10) || now,
+              access: 'read',
+              trackActivity: true,
+              notifications: false,
+              selectedScopes: [],
+            };
+          }
+        });
+        if (Object.keys(patch).length > 0) {
+          actions.setMeta({ integrations: { ...integrations, ...patch } });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const GROUPS = [
     {
@@ -18,7 +51,7 @@ function IntegrationsView({ state }) {
           name: 'Jira',
           logo: 'J',
           bg: '#0052CC',
-          authType: 'oauth',
+          authType: 'atlassian',
           description: 'Sync issues, sprints, and comments. Track what you create and get notified on changes.',
           capabilities: [
             'Read issues, sprints, and comments across projects',
@@ -34,7 +67,7 @@ function IntegrationsView({ state }) {
           name: 'Confluence',
           logo: 'C',
           bg: '#0052CC',
-          authType: 'oauth',
+          authType: 'atlassian',
           description: 'Read and write Confluence pages. Surface your editing activity in the daily log.',
           capabilities: [
             'Read pages, spaces, and comments',
@@ -44,7 +77,7 @@ function IntegrationsView({ state }) {
           ],
           scopeLabel: 'Spaces',
           scopeOptions: ['PROD', 'ENG', 'GTM', 'OPS'],
-          note: 'Uses the same Atlassian account as Jira — one sign-in for both.',
+          note: 'Uses the same Atlassian account as Jira — one set of credentials for both.',
         },
       ],
     },
@@ -56,7 +89,7 @@ function IntegrationsView({ state }) {
           name: 'Slack',
           logo: 'S',
           bg: '#4A154B',
-          authType: 'oauth',
+          authType: 'apikey',
           description: 'Surface threads that need follow-up. Post updates without leaving Operator.',
           capabilities: [
             'Read messages in channels you\'re a member of',
@@ -66,13 +99,15 @@ function IntegrationsView({ state }) {
           ],
           scopeLabel: 'Channels',
           scopeOptions: ['#general', '#engineering', '#product', '#gtm', '#leadership'],
+          keyPlaceholder: 'xoxb-… (Slack bot token)',
+          note: 'Create a Slack app at api.slack.com/apps, add bot scopes channels:read, chat:write, then install to workspace.',
         },
         {
           key: 'teams',
           name: 'Microsoft Teams',
           logo: 'T',
           bg: '#6264A7',
-          authType: 'oauth',
+          authType: 'apikey',
           description: 'Sync Teams calendar and channel activity into Operator.',
           capabilities: [
             'Read calendar events and meetings',
@@ -82,7 +117,8 @@ function IntegrationsView({ state }) {
           ],
           scopeLabel: 'Teams',
           scopeOptions: ['General', 'Engineering', 'Product', 'Leadership'],
-          note: 'Uses the same Microsoft account as Outlook — one sign-in for both.',
+          keyPlaceholder: 'Paste Microsoft Graph access token…',
+          note: 'Get a token via Microsoft Graph Explorer or your IT admin. Uses the same account as Outlook.',
         },
       ],
     },
@@ -94,7 +130,7 @@ function IntegrationsView({ state }) {
           name: 'Outlook',
           logo: 'O',
           bg: '#0078D4',
-          authType: 'oauth',
+          authType: 'apikey',
           description: 'Connect your calendar and email for a complete daily picture.',
           capabilities: [
             'Read calendar events, email, and contacts',
@@ -104,6 +140,7 @@ function IntegrationsView({ state }) {
           ],
           scopeLabel: 'Calendars',
           scopeOptions: ['Primary', 'Work', 'Shared'],
+          keyPlaceholder: 'Paste Microsoft Graph access token…',
           note: 'Uses the same Microsoft account as Teams — one sign-in for both.',
         },
       ],
@@ -145,12 +182,12 @@ function IntegrationsView({ state }) {
             'Risk and decision summarization',
             'Context-aware assistant replies',
           ],
-          note: 'API key is stored in localStorage only — never sent to any third party.',
+          note: 'API key is saved to the server — never sent to any third party.',
           keyPlaceholder: 'sk-ant-…',
         },
         {
-          key: 'chatgpt',
-          name: 'ChatGPT',
+          key: 'openai',
+          name: 'ChatGPT / OpenAI',
           logo: 'G',
           bg: '#10A37F',
           authType: 'apikey',
@@ -159,57 +196,85 @@ function IntegrationsView({ state }) {
             'All assistant features via OpenAI models',
             'Alternative when Claude is unavailable',
           ],
-          note: 'API key is stored in localStorage only — never sent to any third party.',
+          note: 'API key is saved to the server — never sent to any third party.',
           keyPlaceholder: 'sk-…',
         },
       ],
     },
   ];
 
-  const simulateOAuth = (key) => {
+  // Save API key for single-field providers → POST to server
+  const saveApiKey = async (key, value) => {
+    if (!value.trim()) return;
     setConnecting(key);
-    setTimeout(() => {
-      setConnecting(null);
+    try {
+      const credentials = key === 'teams' || key === 'outlook'
+        ? { accessToken: value.trim() }
+        : key === 'claude'
+        ? { apiKey: value.trim() }
+        : key === 'openai'
+        ? { apiKey: value.trim() }
+        : { token: value.trim() };
+
+      await fetch('/api/auth/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: key, credentials }),
+      });
+
       const now = new Date().toISOString().slice(0, 10);
-      const item = GROUPS.flatMap(g => g.items).find(i => i.key === key);
+      actions.setMeta({
+        integrations: {
+          ...integrations,
+          [key]: { connected: true, connectedAt: now, syncedAt: now, access: 'read', trackActivity: false, notifications: false },
+        },
+      });
+      setApiKeyInput(prev => { const n = { ...prev }; delete n[key]; return n; });
+      setExpandedKey(key);
+    } catch (e) {
+      alert(`Failed to save: ${e.message}`);
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  // Save Atlassian credentials (3-field: site, email, token)
+  const saveAtlassian = async (key, fields) => {
+    const { site, email, token } = fields;
+    if (!site.trim() || !email.trim() || !token.trim()) return;
+    setConnecting(key);
+    try {
+      await fetch('/api/auth/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: key, credentials: { site: site.trim(), email: email.trim(), token: token.trim() } }),
+      });
+
+      const now = new Date().toISOString().slice(0, 10);
       actions.setMeta({
         integrations: {
           ...integrations,
           [key]: {
-            connected: true,
-            user: 'you@acme.co',
-            site: key === 'jira' || key === 'confluence' ? 'acme.atlassian.net'
-              : key === 'slack' ? 'acme.slack.com'
-              : key === 'teams' || key === 'outlook' ? 'acme.onmicrosoft.com'
-              : null,
-            connectedAt: now,
-            syncedAt: now,
-            access: 'read',
-            trackActivity: true,
-            notifications: false,
-            selectedScopes: item?.scopeOptions ? [...item.scopeOptions] : [],
+            connected: true, user: email.trim(), site: site.trim().replace(/^https?:\/\//, ''),
+            connectedAt: now, syncedAt: now, access: 'read', trackActivity: true, notifications: false,
+            selectedScopes: [],
           },
         },
       });
+      setAtlassianInput(prev => { const n = { ...prev }; delete n[key]; return n; });
       setExpandedKey(key);
-    }, 2000);
+    } catch (e) {
+      alert(`Failed to save: ${e.message}`);
+    } finally {
+      setConnecting(null);
+    }
   };
 
-  const saveApiKey = (key, value) => {
-    if (!value.trim()) return;
-    const now = new Date().toISOString().slice(0, 10);
-    actions.setMeta({
-      integrations: {
-        ...integrations,
-        [key]: { connected: true, apiKey: value.trim(), connectedAt: now, syncedAt: now, access: 'read', trackActivity: false, notifications: false },
-      },
-    });
-    setApiKeyInput(prev => { const n = { ...prev }; delete n[key]; return n; });
-    setExpandedKey(key);
-  };
-
-  const disconnect = (key, name) => {
+  const disconnect = async (key, name) => {
     if (!confirm(`Disconnect ${name}? Settings will be cleared.`)) return;
+    try {
+      await fetch(`/api/auth/${key}`, { method: 'DELETE' });
+    } catch (e) { /* non-fatal */ }
     actions.setMeta({ integrations: { ...integrations, [key]: { connected: false } } });
     if (expandedKey === key) setExpandedKey(null);
   };
@@ -252,6 +317,8 @@ function IntegrationsView({ state }) {
               const selectedScopes = cfg.selectedScopes || intg.scopeOptions || [];
               const apiVal = apiKeyInput[intg.key] ?? '';
               const showApiInput = !cfg.connected && apiKeyInput.hasOwnProperty(intg.key);
+              const atlassianVal = atlassianInput[intg.key];
+              const showAtlassianInput = !cfg.connected && !!atlassianVal;
 
               return (
                 <div key={intg.key} className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -273,67 +340,120 @@ function IntegrationsView({ state }) {
 
                     {/* Content column */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* Name row — name, pill, status dot, buttons all inline */}
+                      {/* Name row */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: 13.5 }}>{intg.name}</span>
-                        <span className="pill pill-ghost mono" style={{ fontSize: 9 }}>{intg.authType === 'oauth' ? 'OAuth' : 'API key'}</span>
+                        <span className="pill pill-ghost mono" style={{ fontSize: 9 }}>
+                          {intg.authType === 'atlassian' ? 'API token' : 'API key'}
+                        </span>
                         {cfg.connected && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                             <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
                             <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-4)' }}>Connected</span>
                           </span>
                         )}
-                        {/* Buttons pushed to the right of the name row */}
+                        {/* Buttons pushed to the right */}
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                           {!cfg.connected ? (
-                            intg.authType === 'oauth' ? (
-                              <button
-                                className="btn btn-sm btn-primary"
-                                disabled={isConnecting}
-                                onClick={() => simulateOAuth(intg.key)}
-                                style={{ minWidth: 96 }}
-                              >
-                                {isConnecting ? (
-                                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{
-                                      width: 10, height: 10, borderRadius: '50%',
-                                      border: '1.5px solid rgba(255,255,255,.3)',
-                                      borderTopColor: '#fff',
-                                      display: 'inline-block',
-                                      animation: 'spin 0.8s linear infinite',
-                                    }} />
-                                    Connecting…
-                                  </span>
-                                ) : '↗ Connect'}
-                              </button>
-                            ) : (
-                              <button
-                                className="btn btn-sm btn-primary"
-                                onClick={() => setApiKeyInput(prev => ({ ...prev, [intg.key]: '' }))}
-                              >
-                                Add key
-                              </button>
-                            )
+                            <button
+                              className="btn btn-sm btn-primary"
+                              disabled={isConnecting}
+                              onClick={() => {
+                                if (intg.authType === 'atlassian') {
+                                  setAtlassianInput(prev => ({ ...prev, [intg.key]: { site: '', email: '', token: '' } }));
+                                } else {
+                                  setApiKeyInput(prev => ({ ...prev, [intg.key]: '' }));
+                                }
+                              }}
+                              style={{ minWidth: 80 }}
+                            >
+                              {isConnecting ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{
+                                    width: 10, height: 10, borderRadius: '50%',
+                                    border: '1.5px solid rgba(255,255,255,.3)',
+                                    borderTopColor: '#fff',
+                                    display: 'inline-block',
+                                    animation: 'spin 0.8s linear infinite',
+                                  }} />
+                                  Saving…
+                                </span>
+                              ) : 'Connect'}
+                            </button>
                           ) : (
-                        <>
-                          <button className="btn btn-sm" onClick={() => setExpandedKey(isExpanded ? null : intg.key)}>
-                            {isExpanded ? 'Close' : 'Settings'}
-                          </button>
-                          <button className="btn btn-sm" style={{ color: 'var(--fg-4)' }} onClick={() => disconnect(intg.key, intg.name)}>
-                            Disconnect
-                          </button>
-                        </>
-                      )}
-                        </div>{/* end buttons wrapper */}
-                      </div>{/* end name row */}
+                            <>
+                              <button className="btn btn-sm" onClick={() => setExpandedKey(isExpanded ? null : intg.key)}>
+                                {isExpanded ? 'Close' : 'Settings'}
+                              </button>
+                              <button className="btn btn-sm" style={{ color: 'var(--fg-4)' }} onClick={() => disconnect(intg.key, intg.name)}>
+                                Disconnect
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
                       {/* Status / description line */}
                       <div style={{ fontSize: 11.5, color: cfg.connected ? 'var(--fg-4)' : 'var(--fg-3)', marginTop: 4 }}>
                         {cfg.connected
-                          ? [cfg.user, cfg.site && cfg.site, cfg.syncedAt && `Synced ${fmtDate(cfg.syncedAt)}`].filter(Boolean).join(' · ')
+                          ? [cfg.user, cfg.site, cfg.syncedAt && `Synced ${fmtDate(cfg.syncedAt)}`].filter(Boolean).join(' · ')
                           : intg.description}
                       </div>
-                    </div>{/* end content column */}
-                  </div>{/* end card header */}
+                    </div>
+                  </div>
+
+                  {/* Atlassian 3-field input panel */}
+                  {showAtlassianInput && (
+                    <div style={{ borderTop: '1px solid var(--line)', padding: '14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 10.5, color: 'var(--fg-4)', marginBottom: 4 }}>Site URL</div>
+                          <input
+                            autoFocus
+                            className="input"
+                            style={{ width: '100%', fontSize: 12 }}
+                            placeholder="https://acme.atlassian.net"
+                            value={atlassianVal.site}
+                            onChange={e => setAtlassianInput(prev => ({ ...prev, [intg.key]: { ...prev[intg.key], site: e.target.value } }))}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10.5, color: 'var(--fg-4)', marginBottom: 4 }}>Email</div>
+                          <input
+                            className="input"
+                            style={{ width: '100%', fontSize: 12 }}
+                            placeholder="you@acme.co"
+                            value={atlassianVal.email}
+                            onChange={e => setAtlassianInput(prev => ({ ...prev, [intg.key]: { ...prev[intg.key], email: e.target.value } }))}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10.5, color: 'var(--fg-4)', marginBottom: 4 }}>
+                          API token — <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>generate at id.atlassian.com</a>
+                        </div>
+                        <input
+                          className="input"
+                          style={{ width: '100%', fontSize: 12, fontFamily: 'var(--mono)' }}
+                          placeholder="ATATT3x…"
+                          value={atlassianVal.token}
+                          onChange={e => setAtlassianInput(prev => ({ ...prev, [intg.key]: { ...prev[intg.key], token: e.target.value } }))}
+                          onKeyDown={e => { if (e.key === 'Enter') saveAtlassian(intg.key, atlassianVal); }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          disabled={isConnecting || !atlassianVal.site.trim() || !atlassianVal.email.trim() || !atlassianVal.token.trim()}
+                          onClick={() => saveAtlassian(intg.key, atlassianVal)}
+                        >
+                          {isConnecting ? 'Saving…' : 'Save credentials'}
+                        </button>
+                        <button className="btn btn-sm" onClick={() => setAtlassianInput(prev => { const n = {...prev}; delete n[intg.key]; return n; })}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* API key input panel */}
                   {showApiInput && (
@@ -347,7 +467,9 @@ function IntegrationsView({ state }) {
                         onChange={e => setApiKeyInput(prev => ({ ...prev, [intg.key]: e.target.value }))}
                         onKeyDown={e => { if (e.key === 'Enter') saveApiKey(intg.key, apiVal); if (e.key === 'Escape') setApiKeyInput(prev => { const n = {...prev}; delete n[intg.key]; return n; }); }}
                       />
-                      <button className="btn btn-sm btn-primary" disabled={!apiVal.trim()} onClick={() => saveApiKey(intg.key, apiVal)}>Save</button>
+                      <button className="btn btn-sm btn-primary" disabled={!apiVal.trim() || isConnecting} onClick={() => saveApiKey(intg.key, apiVal)}>
+                        {isConnecting ? 'Saving…' : 'Save'}
+                      </button>
                       <button className="btn btn-sm" onClick={() => setApiKeyInput(prev => { const n = {...prev}; delete n[intg.key]; return n; })}>Cancel</button>
                     </div>
                   )}
@@ -369,26 +491,24 @@ function IntegrationsView({ state }) {
                         </div>
                       </div>
 
-                      {/* Access level — only for OAuth */}
-                      {intg.authType === 'oauth' && (
-                        <div>
-                          <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 8 }}>Access level</div>
-                          <div className="seg" style={{ width: 'fit-content' }}>
-                            {[['read', 'Read only'], ['read-write', 'Read + write']].map(([val, label]) => (
-                              <button key={val}
-                                className={`seg-btn ${(cfg.access || 'read') === val ? 'active' : ''}`}
-                                onClick={() => updateIntg(intg.key, { access: val })}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 6 }}>
-                            {(cfg.access || 'read') === 'read'
-                              ? 'Read only — Operator will never create or modify anything in this tool.'
-                              : 'Read + write — Operator can create, comment, and update records on your behalf.'}
-                          </div>
+                      {/* Access level */}
+                      <div>
+                        <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 8 }}>Access level</div>
+                        <div className="seg" style={{ width: 'fit-content' }}>
+                          {[['read', 'Read only'], ['read-write', 'Read + write']].map(([val, label]) => (
+                            <button key={val}
+                              className={`seg-btn ${(cfg.access || 'read') === val ? 'active' : ''}`}
+                              onClick={() => updateIntg(intg.key, { access: val })}>
+                              {label}
+                            </button>
+                          ))}
                         </div>
-                      )}
+                        <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 6 }}>
+                          {(cfg.access || 'read') === 'read'
+                            ? 'Read only — Operator will never create or modify anything in this tool.'
+                            : 'Read + write — Operator can create, comment, and update records on your behalf.'}
+                        </div>
+                      </div>
 
                       {/* Tracking toggles */}
                       <div>
@@ -463,8 +583,8 @@ function IntegrationsView({ state }) {
       ))}
 
       <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', borderTop: '1px solid var(--line)', paddingTop: 16 }}>
-        OAuth connections redirect to the provider for authorization — your credentials are never stored by Operator.
-        API keys are saved to localStorage on this device only.
+        Credentials are saved to <code>data/tokens.json</code> on the server — never transmitted to third parties.
+        API keys and tokens are not logged or exposed via the API.
       </div>
     </div>
   );

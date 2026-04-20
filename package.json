@@ -2,16 +2,49 @@
   "name": "operator",
   "version": "1.0.0",
   "description": "Solo operator project management",
-  "main": "server.js",
+  "main": "src/main/index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "electron": "concurrently \"node server.js\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:dev": "concurrently --kill-others \"node --watch server.js\" \"wait-on http://localhost:3000 && electron . --inspect\"",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.19.2"
   },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^7.2.0"
+  },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "build": {
+    "appId": "com.operator.solo",
+    "productName": "Operator",
+    "copyright": "Copyright © 2026",
+    "files": [
+      "src/**",
+      "server.js",
+      "Project Management.html",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }]
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "linux": {
+      "target": [{ "target": "AppImage", "arch": ["x64"] }]
+    }
   }
 }
