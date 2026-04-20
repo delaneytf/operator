@@ -1,6 +1,6 @@
 // Electron main process — starts Express server, creates BrowserWindow
 
-const { app, BrowserWindow, Menu, shell, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, nativeTheme } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 
@@ -92,6 +92,7 @@ function buildMenu() {
       label: app.name,
       submenu: [
         { role: 'about' },
+        { label: 'Check for Updates…', click: () => checkForUpdates(false) },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -140,10 +141,11 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
   buildMenu();
-  // Tell the server where to store data — userData survives app updates and is writable
   process.env.OPERATOR_DATA_DIR = app.getPath('userData');
   await startServer();
   createWindow();
+  // Check for updates silently after the window is shown
+  setTimeout(() => checkForUpdates(true), 5000);
 
   app.on('activate', () => {
     if (!mainWindow) createWindow();
@@ -160,3 +162,52 @@ app.on('before-quit', () => {
     serverProcess = null;
   }
 });
+
+// ── Update checker ────────────────────────────────────────────────────────────
+
+async function checkForUpdates(silent = false) {
+  try {
+    const res = await fetch('https://api.github.com/repos/delaneytf/operator/releases/latest', {
+      headers: { 'User-Agent': 'Operator-App' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    const release = await res.json();
+    const latest = release.tag_name?.replace(/^v/, '');
+    const current = app.getVersion();
+
+    if (latest && latest !== current) {
+      // Pick the right asset for this platform/arch
+      const isArm = process.arch === 'arm64';
+      const assetName = isArm ? 'arm64.dmg' : '.dmg';
+      const asset = (release.assets || []).find((a) =>
+        process.platform === 'darwin'
+          ? a.name.endsWith(isArm ? '-arm64.dmg' : '.dmg') && !a.name.includes('arm64') === !isArm
+          : a.name.endsWith('.exe') || a.name.endsWith('.AppImage')
+      );
+      const downloadUrl = asset?.browser_download_url || release.html_url;
+
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Available',
+        message: `Operator ${release.tag_name} is available`,
+        detail: `You're on v${current}. Download the latest version now?`,
+        buttons: ['Download', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response === 0) shell.openExternal(downloadUrl);
+    } else if (!silent) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Up to Date',
+        message: `Operator v${current} is the latest version.`,
+        buttons: ['OK'],
+      });
+    }
+  } catch (e) {
+    if (!silent) {
+      dialog.showErrorBox('Update Check Failed', `Could not reach GitHub: ${e.message}`);
+    }
+  }
+}
