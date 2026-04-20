@@ -107,8 +107,10 @@ const actions = {
 
   // Tasks
   addTask(task) {
+    const existingMax = Math.max(0, ...STATE.tasks.map((t) => { const n = parseInt(t.id.replace(/^t-/, '')); return isNaN(n) ? 0 : n; }));
+    const seq = Math.max(STATE.meta.nextTaskId || 0, existingMax + 1);
     const t = {
-      id: uid('t'),
+      id: `t-${seq}`,
       status: 'todo',
       priority: 'medium',
       rank: 99,
@@ -119,7 +121,7 @@ const actions = {
       estimate: 1,
       ...task,
     };
-    setState((s) => ({ ...s, tasks: [...s.tasks, t] }));
+    setState((s) => ({ ...s, tasks: [...s.tasks, t], meta: { ...s.meta, nextTaskId: seq + 1 } }));
     return t;
   },
   updateTask(id, patch) {
@@ -227,8 +229,10 @@ const actions = {
 
   // Notes
   addNote(n) {
-    const note = { id: uid('n'), kind: 'decision', date: todayStr(), tags: [], ...n };
-    setState((s) => ({ ...s, notes: [note, ...s.notes] }));
+    const existingMax = Math.max(0, ...STATE.notes.map((x) => { const num = parseInt(x.id.replace(/^n-/, '')); return isNaN(num) ? 0 : num; }));
+    const seq = Math.max(STATE.meta.nextNoteId || 0, existingMax + 1);
+    const note = { id: `n-${seq}`, kind: 'decision', date: todayStr(), tags: [], ...n };
+    setState((s) => ({ ...s, notes: [note, ...s.notes], meta: { ...s.meta, nextNoteId: seq + 1 } }));
     return note;
   },
   updateNote(id, patch) {
@@ -240,24 +244,38 @@ const actions = {
 
   // Risks
   addRisk(r) {
+    const existingMax = Math.max(0, ...STATE.risks.map((x) => { const n = parseInt(x.id.replace(/^r-/, '')); return isNaN(n) ? 0 : n; }));
+    const seq = Math.max(STATE.meta.nextRiskId || 0, existingMax + 1);
     const risk = {
-      id: uid('r'),
+      id: `r-${seq}`,
       severity: 3,
       likelihood: 3,
       mitigation: '',
       owner: 'You',
       status: 'open',
       createdAt: todayStr(),
+      updatedAt: todayStr(),
+      category: '',
+      response: '',
+      description: '',
+      impact: '',
+      trigger: '',
+      contingency: '',
+      dueDate: '',
+      reviewDate: '',
       ...r,
     };
-    setState((s) => ({ ...s, risks: [...s.risks, risk] }));
+    setState((s) => ({ ...s, risks: [...s.risks, risk], meta: { ...s.meta, nextRiskId: seq + 1 } }));
     return risk;
   },
   updateRisk(id, patch) {
-    setState((s) => ({ ...s, risks: s.risks.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
+    setState((s) => ({ ...s, risks: s.risks.map((r) => (r.id === id ? { ...r, ...patch, updatedAt: todayStr() } : r)) }));
   },
   deleteRisk(id) {
     setState((s) => ({ ...s, risks: s.risks.filter((r) => r.id !== id) }));
+  },
+  setRiskFields(fields) {
+    setState((s) => ({ ...s, meta: { ...s.meta, riskFields: fields } }));
   },
 
   // Meetings
@@ -405,6 +423,23 @@ const actions = {
   },
   deleteReminder(id) {
     setState((s) => ({ ...s, reminders: (s.reminders || []).filter((r) => r.id !== id) }));
+  },
+
+  // Daily plan artifacts (one per day, keyed by date)
+  saveDailyPlan(date, planData) {
+    setState((s) => ({
+      ...s,
+      dailyPlans: { ...(s.dailyPlans || {}), [date]: planData },
+    }));
+  },
+  updateDailyPlan(date, patch) {
+    setState((s) => ({
+      ...s,
+      dailyPlans: {
+        ...(s.dailyPlans || {}),
+        [date]: { ...(s.dailyPlans?.[date] || {}), ...patch },
+      },
+    }));
   },
 
   // Day notes (EOD notes keyed by date)

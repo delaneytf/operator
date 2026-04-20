@@ -142,11 +142,11 @@ function QuestionRow({ note, projects, expanded, onToggleExpand, onEdit, onResol
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: note.resolved ? 'var(--ok)' : 'var(--warn)', flexShrink: 0 }} />
         </div>
-        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="truncate" style={{ fontWeight: 500, fontSize: 13 }}>{note.title}</span>
         </div>
         <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', display: 'flex', alignItems: 'center' }}>
-          {fmtDate(note.date)}
+          {note.resolved && note.resolvedAt ? fmtDate(note.resolvedAt) : fmtDate(note.date)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {note.resolved
@@ -166,6 +166,8 @@ function QuestionRow({ note, projects, expanded, onToggleExpand, onEdit, onResol
         <div className="pq-detail" onClick={(e) => e.stopPropagation()}>
           <div className="pq-meta-row">
             <div className="pq-meta">
+              <span className="pq-meta-item mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>Q-{note.id.replace(/^n-/, '')}</span>
+              <span className="pq-meta-sep" />
               <span className="pq-meta-item">
                 {note.resolved
                   ? <span className="pill pill-ok" style={{ fontSize: 10, padding: '1px 6px' }}>resolved</span>
@@ -280,6 +282,11 @@ function QuestionModal({ noteId, state, defaults, onClose }) {
           <span className="field-label">Date asked</span>
           <input className="input" type="date" value={local.date || todayIso} onChange={(e) => set({ date: e.target.value })} />
         </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Resolution date</span>
+          <input className="input" type="date" value={local.resolvedAt || ''} onChange={(e) => set({ resolvedAt: e.target.value || null })}
+            placeholder="—" />
+        </div>
       </div>
       {state.projects.length > 0 && (
         <div className="field">
@@ -339,6 +346,7 @@ function ResolveQuestionModal({ noteId, state, onClose }) {
   const note = (state.notes || []).find((n) => n.id === noteId);
   const [resolution, setResolution] = React.useState(note?.resolution || '');
   const todayIso = new Date().toISOString().slice(0, 10);
+  const [resolvedAt, setResolvedAt] = React.useState(note?.resolvedAt || todayIso);
   if (!note) return null;
 
   return (
@@ -350,9 +358,13 @@ function ResolveQuestionModal({ noteId, state, onClose }) {
           onChange={(e) => setResolution(e.target.value)}
           placeholder="How was this resolved? What did you decide or learn?" />
       </div>
+      <div className="field">
+        <span className="field-label">Resolution date</span>
+        <input className="input" type="date" value={resolvedAt} onChange={(e) => setResolvedAt(e.target.value)} />
+      </div>
       <div className="modal-foot">
         <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => { actions.updateNote(noteId, { resolved: true, resolution, resolvedAt: todayIso }); onClose(); }}>
+        <button className="btn btn-primary" onClick={() => { actions.updateNote(noteId, { resolved: true, resolution, resolvedAt }); onClose(); }}>
           Mark resolved
         </button>
       </div>

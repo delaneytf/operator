@@ -243,7 +243,6 @@ function TaskReadOnlyModal({ taskId, state, onClose, onEdit, onJumpTo }) {
 
 function Today({ state, onOpenTask, onOpenProject }) {
   const [showAdd, setShowAdd] = useStateT2(false);
-  const [planning, setPlanning] = useStateT2(false);
   const [endDayModal, setEndDayModal] = useStateT2(false);
   const [collapsed, setCollapsed] = useStateT2({ overdue: false, today: false, soon: false, remaining: true });
   const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -451,7 +450,7 @@ function Today({ state, onOpenTask, onOpenProject }) {
               <div className="committed-sub">{committedHours}h time-boxed · pulled from priority queue</div>
             </div>
             <div className="row-flex">
-              <button className="btn btn-sm" onClick={() => setPlanning(true)}>Edit plan</button>
+              <button className="btn btn-sm" onClick={() => document.getElementById('plan-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Edit plan</button>
               <button className="btn btn-sm" onClick={() => setEndDayModal(true)}>End day</button>
             </div>
           </div>
@@ -479,18 +478,8 @@ function Today({ state, onOpenTask, onOpenProject }) {
         </div>
       )}
 
-      {/* Plan my day CTA */}
-      {!hasPlan && (
-        <div className="plan-cta">
-          <div>
-            <div className="plan-cta-title">Plan today</div>
-            <div className="plan-cta-sub">Commit to 3–5 tasks. End-of-day mark shipped.</div>
-          </div>
-          <button className="btn btn-primary" onClick={() => setPlanning(true)}>
-            <Icon name="target" size={12} /> Plan my day
-          </button>
-        </div>
-      )}
+      {/* Inline plan section */}
+      <PlanMyDaySection state={state} />
 
       {/* Jira blocker resolution notifications */}
       {resolvedJiraBlockers.length > 0 && (
@@ -625,7 +614,6 @@ function Today({ state, onOpenTask, onOpenProject }) {
         </>
       )}
 
-      {planning && <PlanMyDayModal state={state} onClose={() => setPlanning(false)} />}
       {endDayModal && <EndDayModal state={state} onClose={() => setEndDayModal(false)} />}
       {readOnlyTaskId && (
         <TaskReadOnlyModal
@@ -640,51 +628,738 @@ function Today({ state, onOpenTask, onOpenProject }) {
   );
 }
 
-function PlanMyDayModal({ state, onClose }) {
-  const prioritized = todayTasks(state, 40);
-  const [picked, setPicked] = useStateT2(state.meta.plannedToday || []);
+function PlanMyDaySection({ state }) {
+  const todayStr = localIso();
+  const existingPlan = (state.dailyPlans || {})[todayStr] || null;
 
-  const toggle = (id) => setPicked((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  const [phase, setPhase] = React.useState(() => existingPlan ? 'plan' : 'idle'); // 'idle' | 'loading' | 'plan' | 'refine-loading'
+  const [plan, setPlan] = React.useState(() => existingPlan?.plan || []);
+  const [watchlist, setWatchlist] = React.useState(() => existingPlan?.watchlist || []);
+  const [insights, setInsights] = React.useState(() => existingPlan?.insights || []);
+  const [picked, setPicked] = React.useState(() => state.meta.plannedToday || []);
+  const [feedback, setFeedback] = React.useState('');
+  const [aiReply, setAiReply] = React.useState('');
+  const [suggestedActions, setSuggestedActions] = React.useState([]);
+  const [acceptedActions, setAcceptedActions] = React.useState(new Set());
+  const [skippedActions, setSkippedActions] = React.useState(new Set());
+  const [error, setError] = React.useState(null);
+  const [expandedWatchIdx, setExpandedWatchIdx] = React.useState(null);
+  const [expandedDeferredIdx, setExpandedDeferredIdx] = React.useState(null);
+  const [deferred, setDeferred] = React.useState(() => existingPlan?.deferred || []);
 
-  const hours = picked.reduce((a, id) => a + (state.tasks.find((t) => t.id === id)?.estimate || 0), 0);
+  const buildCtx = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const openTasks = state.tasks
+      .filter(t => t.status !== 'done')
+      .map(t => {
+        const proj = state.projects.find(p => p.id === t.projectId);
+        const taskBlockers = state.blockers.filter(b => b.taskId === t.id);
+        const deps = (t.dependsOn || []).map(id => state.tasks.find(x => x.id === id)).filter(Boolean);
+        const requiredBy = state.tasks.filter(x => (x.dependsOn || []).includes(t.id));
+        return {
+          id: t.id, title: t.title, priority: t.priority, status: t.status,
+          dueDate: t.dueDate || null, daysUntilDue: t.dueDate ? daysFromToday(t.dueDate) : null,
+          estimate: t.estimate || 0, project: proj ? proj.code : null, projectId: proj ? proj.id : null,
+          hasBlockers: taskBlockers.length > 0,
+          oldestBlockerDays: taskBlockers.length ? Math.round((Date.now() - new Date(taskBlockers[0].since).getTime()) / 86400000) : null,
+          blockerDescription: taskBlockers.map(b => b.description).join('; '),
+          dependsOn: deps.map(d => ({ id: d.id, title: d.title, status: d.status })),
+          requiredBy: requiredBy.slice(0, 2).map(r => ({ id: r.id, title: r.title, dueDate: r.dueDate })),
+        };
+      })
+      .sort((a, b) => (PRIORITY_ORDER[a.priority] || 2) - (PRIORITY_ORDER[b.priority] || 2));
+
+    const openRisks = state.risks
+      .filter(r => r.status !== 'closed')
+      .map(r => ({
+        id: r.id, title: r.title, score: r.severity * r.likelihood,
+        reviewDate: r.reviewDate || null, daysUntilReview: r.reviewDate ? daysFromToday(r.reviewDate) : null,
+        project: (state.projects.find(p => p.id === r.projectId) || {}).code, projectId: r.projectId,
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const openQuestions = (state.notes || [])
+      .filter(n => n.kind === 'question' && !n.resolved)
+      .map(q => ({
+        id: q.id, title: q.title,
+        daysOpen: q.date ? Math.round((Date.now() - new Date(q.date).getTime()) / 86400000) : 0,
+        projectId: q.projectId || (q.projectIds || [])[0] || null,
+        project: (state.projects.find(p => p.id === (q.projectId || (q.projectIds || [])[0])) || {}).code,
+      }));
+
+    const projects = state.projects.filter(p => p.status !== 'done').map(p => ({
+      id: p.id, code: p.code, name: p.name, status: p.status,
+      dueDate: p.dueDate, daysUntilDue: p.dueDate ? daysFromToday(p.dueDate) : null,
+    }));
+
+    return { today, openTasks, openRisks, openQuestions, projects };
+  };
+
+  const callAI = async (system, userMsg) => {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system, messages: [{ role: 'user', content: userMsg }] }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+    return data.text;
+  };
+
+  const parseAIJSON = (text) => {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try { return JSON.parse(match[0]); } catch { return null; }
+  };
+
+  const generatePlan = async () => {
+    setPhase('loading');
+    setError(null);
+    setAiReply('');
+    setSuggestedActions([]);
+    setAcceptedActions(new Set());
+    setSkippedActions(new Set());
+    try {
+      const ctx = buildCtx();
+      const sys = `You are an AI executive assistant embedded in a project management tool. Generate a smart daily work plan. Return ONLY valid JSON — no markdown fences, no preamble, no explanation outside the JSON.`;
+      const msg = `Today is ${ctx.today}. Daily capacity: 6 hours. Generate a focused daily plan from this data:
+
+OPEN TASKS:
+${JSON.stringify(ctx.openTasks.slice(0, 30), null, 1)}
+
+OPEN RISKS:
+${JSON.stringify(ctx.openRisks.slice(0, 8), null, 1)}
+
+OPEN QUESTIONS:
+${JSON.stringify(ctx.openQuestions.slice(0, 6), null, 1)}
+
+ACTIVE PROJECTS:
+${JSON.stringify(ctx.projects, null, 1)}
+
+Return exactly this JSON:
+{"plan":[{"taskId":"...","section":"priority","reason":"under 12 words"}],"deferred":[{"taskId":"...","reason":"under 10 words","suggestDate":"tomorrow|this-week|next-week"}],"watchlist":[{"type":"risk","id":"...","title":"...","note":"under 12 words"}],"insights":["observation"]}
+
+Rules:
+- CAPACITY: plan must total ≤6h of estimated work. Pick the highest-value tasks that fit. If critical tasks alone exceed 6h, include them anyway and note the overload in insights.
+- plan: 3–6 tasks. section = "priority" (overdue/critical/high due within 3 days), "unblock" (active blocker >1 day — needs follow-up today), "prerequisite" (unlocks something with near deadline). Only use task ids from OPEN TASKS above. Reasons under 12 words.
+- deferred: tasks you considered but dropped due to capacity or lower priority. Include 1–4 items with honest reasons and a suggested timeframe. Only use task ids from OPEN TASKS.
+- watchlist: 2–4 items. High-score risks, deadlines within 7 days, questions open 7+ days. Use actual ids from the data.
+- insights: 1–3 punchy observations — especially call out if today is over capacity and what the tradeoffs are.`;
+
+      const raw = await callAI(sys, msg);
+      const parsed = parseAIJSON(raw);
+      if (!parsed || !Array.isArray(parsed.plan)) throw new Error('Unexpected response format');
+
+      const validPlan = parsed.plan.filter(item => item.taskId && state.tasks.some(t => t.id === item.taskId && t.status !== 'done'));
+      const validDeferred = (parsed.deferred || []).filter(item => item.taskId && state.tasks.some(t => t.id === item.taskId && t.status !== 'done'));
+      setPlan(validPlan);
+      setDeferred(validDeferred);
+      setWatchlist(parsed.watchlist || []);
+      setInsights(parsed.insights || []);
+      setPicked(validPlan.map(p => p.taskId));
+      actions.saveDailyPlan(todayStr, {
+        date: todayStr,
+        generatedAt: new Date().toISOString(),
+        plan: validPlan,
+        deferred: validDeferred,
+        watchlist: parsed.watchlist || [],
+        insights: parsed.insights || [],
+        committed: [],
+        aiReplies: [],
+      });
+    } catch (e) {
+      setError('AI unavailable — showing smart defaults. ' + (e.message || ''));
+      const ctx = buildCtx();
+      const fallback = ctx.openTasks.slice(0, 5).map((t, i) => ({
+        taskId: t.id,
+        section: t.hasBlockers ? 'unblock' : (t.daysUntilDue !== null && t.daysUntilDue <= 0 ? 'priority' : i < 2 ? 'priority' : 'prerequisite'),
+        reason: t.hasBlockers ? 'Active blocker — follow up today' : t.daysUntilDue !== null && t.daysUntilDue <= 0 ? 'Overdue — needs immediate attention' : 'High priority for today',
+      }));
+      setPlan(fallback);
+      setPicked(fallback.map(p => p.taskId));
+      actions.saveDailyPlan(todayStr, {
+        date: todayStr,
+        generatedAt: new Date().toISOString(),
+        plan: fallback,
+        deferred: [],
+        watchlist: [],
+        insights: [],
+        committed: [],
+        aiReplies: [],
+      });
+    }
+    setPhase('plan');
+  };
+
+  const refinePlan = async () => {
+    if (!feedback.trim()) return;
+    setPhase('refine-loading');
+    setError(null);
+    try {
+      const ctx = buildCtx();
+      const sys = `You are an AI executive assistant. The user is refining their daily plan. Return ONLY valid JSON.`;
+      const currentPlanDesc = plan.map(p => {
+        const task = state.tasks.find(t => t.id === p.taskId);
+        return { taskId: p.taskId, title: task?.title || '?', section: p.section };
+      });
+      const msg = `Current plan: ${JSON.stringify(currentPlanDesc)}
+
+User feedback: "${feedback}"
+
+Open tasks for reference:
+${JSON.stringify(ctx.openTasks.slice(0, 30), null, 1)}
+
+Open risks:
+${JSON.stringify(ctx.openRisks.slice(0, 8), null, 1)}
+
+Projects:
+${JSON.stringify(ctx.projects, null, 1)}
+
+Daily capacity: 6 hours. Return:
+{"feedbackResponse":"one sentence acknowledgment","plan":[{"taskId":"...","section":"priority|unblock|prerequisite","reason":"under 12 words"}],"deferred":[{"taskId":"...","reason":"under 10 words","suggestDate":"tomorrow|this-week|next-week"}],"watchlist":[{"type":"risk|deadline|question","id":"...","title":"...","note":"..."}],"suggestedActions":[{"type":"addBlocker|addTask|addRisk|addQuestion","label":"short label under 10 words","params":{}}]}
+
+suggestedActions params:
+- addBlocker: {"taskId":"...","description":"what is blocking","waitingOn":"person or team"}
+- addTask: {"title":"...","priority":"critical|high|medium|low","projectId":"...","dueDate":"YYYY-MM-DD or null"}
+- addRisk: {"title":"...","projectId":"...","severity":3,"likelihood":3,"description":"..."}
+- addQuestion: {"title":"...","projectId":"..."}
+
+Only suggest actions that directly follow from the feedback. Empty array if none needed.`;
+
+      const raw = await callAI(sys, msg);
+      const parsed = parseAIJSON(raw);
+      if (!parsed) throw new Error('Invalid response');
+
+      if (parsed.feedbackResponse) setAiReply(parsed.feedbackResponse);
+      const curPlan = (state.dailyPlans || {})[todayStr] || {};
+      if (parsed.plan) {
+        const validPlan = parsed.plan.filter(item => item.taskId && state.tasks.some(t => t.id === item.taskId && t.status !== 'done'));
+        const validDeferred = (parsed.deferred || []).filter(item => item.taskId && state.tasks.some(t => t.id === item.taskId && t.status !== 'done'));
+        setPlan(validPlan);
+        setPicked(validPlan.map(p => p.taskId));
+        if (parsed.deferred) setDeferred(validDeferred);
+        actions.updateDailyPlan(todayStr, {
+          plan: validPlan,
+          deferred: validDeferred,
+          watchlist: parsed.watchlist || watchlist,
+          aiReplies: [...(curPlan.aiReplies || []), parsed.feedbackResponse].filter(Boolean),
+        });
+      }
+      if (parsed.watchlist) setWatchlist(parsed.watchlist);
+      if (parsed.suggestedActions) {
+        setSuggestedActions(parsed.suggestedActions);
+        setAcceptedActions(new Set());
+        setSkippedActions(new Set());
+      }
+      setFeedback('');
+    } catch (e) {
+      setError('Could not refine plan. ' + (e.message || ''));
+    }
+    setPhase('plan');
+  };
+
+  const applyAction = (action, idx) => {
+    try {
+      const p = action.params || {};
+      if (action.type === 'addBlocker' && p.taskId) {
+        actions.addBlocker({ taskId: p.taskId, description: p.description || action.label, waitingOn: p.waitingOn || '—' });
+      } else if (action.type === 'addTask') {
+        actions.addTask({ title: p.title || action.label, priority: p.priority || 'medium', projectId: p.projectId || null, dueDate: p.dueDate || null });
+      } else if (action.type === 'addRisk') {
+        actions.addRisk({ title: p.title || action.label, projectId: p.projectId || null, severity: p.severity || 3, likelihood: p.likelihood || 3, description: p.description || '' });
+      } else if (action.type === 'addQuestion') {
+        actions.addNote({ kind: 'question', title: p.title || action.label, projectId: p.projectId || null, date: new Date().toISOString().slice(0, 10) });
+      }
+      setAcceptedActions(prev => new Set([...prev, idx]));
+    } catch (e) { console.error('Action failed', e); }
+  };
+
+  const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const hours = picked.reduce((a, id) => a + (state.tasks.find(t => t.id === id)?.estimate || 0), 0);
   const over = hours > 6;
+  const isLoading = phase === 'loading' || phase === 'refine-loading';
 
-  return (
-    <Modal open={true} onClose={onClose} title="Plan my day" wide>
-      <div className="plan-intro">
-        Commit to 3–5 tasks. Aim for 4–6 hours of real work (meetings, email, and context switching eat the rest). Ship the committed list before pulling more.
-      </div>
-      <div className="row-flex-sb" style={{ margin: '12px 0 8px' }}>
-        <div className="mono" style={{ fontSize: 12, color: 'var(--fg-2)' }}>
-          {picked.length} picked · <strong style={{ color: over ? 'var(--warn)' : 'var(--fg)' }}>{hours}h committed</strong>
+  const commitPlan = () => {
+    actions.setPlannedToday(picked);
+    actions.updateDailyPlan(todayStr, { committed: picked });
+  };
+
+  const [sectionCollapsed, setSectionCollapsed] = React.useState(false);
+
+  // If the store loads a plan after initial mount (e.g. server sync), transition out of idle
+  React.useEffect(() => {
+    if (phase === 'idle' && existingPlan) {
+      setPlan(existingPlan.plan || []);
+      setDeferred(existingPlan.deferred || []);
+      setWatchlist(existingPlan.watchlist || []);
+      setInsights(existingPlan.insights || []);
+      setPhase('plan');
+    }
+  }, [existingPlan]);
+
+  const SECTION_META = {
+    priority:     { label: 'Must do today',        color: 'var(--danger)', icon: 'bolt' },
+    unblock:      { label: 'Follow up · unblock',  color: 'var(--warn)',   icon: 'clock' },
+    prerequisite: { label: 'Enables what\'s next', color: 'var(--info)',   icon: 'link' },
+  };
+  const ACTION_LABELS = { addBlocker: 'Add blocker', addTask: 'New task', addRisk: 'Flag risk', addQuestion: 'Log question' };
+
+  const planIds = new Set(plan.map(p => p.taskId));
+  const otherTasks = state.tasks
+    .filter(t => t.status !== 'done' && !planIds.has(t.id))
+    .sort((a, b) => (PRIORITY_ORDER[a.priority] || 2) - (PRIORITY_ORDER[b.priority] || 2))
+    .slice(0, 20);
+
+  if (phase === 'idle') {
+    return (
+      <div className="plan-cta">
+        <div>
+          <div className="plan-cta-title">Plan today</div>
+          <div className="plan-cta-sub">AI analyzes your tasks, risks, and deadlines to build a focused daily plan.</div>
         </div>
-        <button className="btn btn-sm" onClick={() => setPicked([])}>Clear</button>
-      </div>
-      <div className="plan-list">
-        {prioritized.slice(0, 25).map((t) => {
-          const p = state.projects.find((pp) => pp.id === t.projectId);
-          const selected = picked.includes(t.id);
-          const deps = blockingDeps(state, t);
-          return (
-            <label key={t.id} className={`plan-row ${selected ? 'selected' : ''}`}>
-              <input type="checkbox" checked={selected} onChange={() => toggle(t.id)} />
-              <PriorityBadge priority={t.priority} />
-              <span className="truncate" style={{ fontWeight: 500 }}>{t.title}</span>
-              {deps.length > 0 && <span className="pill pill-warn" title={deps.map((d) => d.title).join('\n')}><Icon name="link" size={10} /> blocked</span>}
-              <ProjectChip project={p} />
-              <DueChip date={t.dueDate} small />
-              <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>{t.estimate}h</span>
-            </label>
-          );
-        })}
-      </div>
-      <div className="modal-foot">
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => { actions.setPlannedToday(picked); onClose(); }} disabled={picked.length === 0}>
-          Commit to {picked.length} task{picked.length === 1 ? '' : 's'}
+        <button className="btn btn-primary" onClick={generatePlan}>
+          <Icon name="target" size={12} /> Plan my day
         </button>
       </div>
-    </Modal>
+    );
+  }
+
+  return (
+    <div className="card" id="plan-section" style={{ marginBottom: 18 }}>
+      <div className="card-head" style={{ flexWrap: 'wrap', gap: 8, cursor: 'pointer' }} onClick={() => setSectionCollapsed(c => !c)}>
+        <div className="row-flex" style={{ gap: 8 }}>
+          <Icon name={sectionCollapsed ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+          <Icon name="bolt" size={13} style={{ color: 'var(--accent)' }} />
+          <span className="card-head-title">Plan my day</span>
+          {isLoading && <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
+            · {phase === 'refine-loading' ? 'refining…' : 'generating…'}
+          </span>}
+          {!isLoading && existingPlan?.generatedAt && (
+            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
+              · {new Date(existingPlan.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          )}
+        </div>
+        {!isLoading && (
+          <div className="row-flex" style={{ gap: 6 }} onClick={e => e.stopPropagation()}>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+              {picked.length} sel. · <span style={{ color: over ? 'var(--warn)' : 'var(--fg-2)', fontWeight: 600 }}>{hours}h</span>
+              {over && <span style={{ color: 'var(--warn)' }}> · over capacity</span>}
+            </span>
+            <button className="btn btn-sm" onClick={() => setPicked([])}>Clear</button>
+            <button className="btn btn-sm" onClick={generatePlan}><Icon name="bolt" size={10} /> Regenerate</button>
+            <button className="btn btn-primary btn-sm" disabled={picked.length === 0} onClick={commitPlan}>
+              Commit{picked.length > 0 ? ` · ${hours}h` : ''}
+            </button>
+          </div>
+        )}
+      </div>
+      {!sectionCollapsed && isLoading && (
+        <div style={{ padding: '40px 0', textAlign: 'center' }}>
+          <div className="chat-typing" style={{ justifyContent: 'center', marginBottom: 12 }}>
+            <span /><span /><span />
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--fg-4)', marginTop: 10 }}>
+            {phase === 'loading' ? 'Analyzing your tasks, risks, and deadlines…' : 'Updating your plan…'}
+          </div>
+        </div>
+      )}
+
+      {!sectionCollapsed && !isLoading && (
+        <>
+          {/* Insights */}
+          {insights.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14, padding: '12px 14px 0' }}>
+              {insights.map((ins, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 10px', flex: '1 1 auto',
+                  background: 'oklch(60% 0.15 280 / 0.08)', border: '1px solid oklch(60% 0.15 280 / 0.2)',
+                  borderRadius: 6, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.4,
+                }}>
+                  <Icon name="bolt" size={10} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+                  {ins}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* AI reply after refine */}
+          {aiReply && (
+            <div style={{
+              padding: '8px 12px', margin: '12px 14px', borderRadius: 6, fontSize: 12, color: 'var(--fg-2)',
+              background: 'oklch(55% 0.12 200 / 0.08)', border: '1px solid oklch(55% 0.12 200 / 0.2)',
+              display: 'flex', gap: 8, alignItems: 'flex-start',
+            }}>
+              <Icon name="bolt" size={11} style={{ color: 'var(--info)', flexShrink: 0, marginTop: 1 }} />
+              {aiReply}
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              padding: '7px 11px', margin: '12px 14px', borderRadius: 6, fontSize: 11.5, color: 'var(--danger)',
+              background: 'oklch(55% 0.2 25 / 0.07)', border: '1px solid oklch(55% 0.2 25 / 0.2)',
+            }}>
+              {error}
+            </div>
+          )}
+
+          {/* AI-suggested sections */}
+          <div className="plan-list" style={{ marginBottom: 0 }}>
+            {plan.length === 0 && (
+              <div style={{ padding: '16px 14px', color: 'var(--fg-4)', fontSize: 12, textAlign: 'center' }}>
+                No AI suggestions — select tasks manually below.
+              </div>
+            )}
+            {['priority', 'unblock', 'prerequisite'].map(section => {
+              const items = plan.filter(p => p.section === section);
+              if (!items.length) return null;
+              const sm = SECTION_META[section];
+              return (
+                <React.Fragment key={section}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px 4px', borderTop: '1px solid var(--line)' }}>
+                    <Icon name={sm.icon} size={10} style={{ color: sm.color }} />
+                    <span className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: sm.color, fontWeight: 600 }}>
+                      {sm.label}
+                    </span>
+                  </div>
+                  {items.map(item => {
+                    const task = state.tasks.find(t => t.id === item.taskId);
+                    if (!task) return null;
+                    const proj = state.projects.find(p => p.id === task.projectId);
+                    const isSelected = picked.includes(task.id);
+                    const taskBlockers = state.blockers.filter(b => b.taskId === task.id);
+                    return (
+                      <label key={task.id} className={`plan-row ${isSelected ? 'selected' : ''}`}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: '8px 14px', cursor: 'pointer' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <input type="checkbox" checked={isSelected} onChange={() => toggle(task.id)} style={{ flexShrink: 0 }} />
+                          <PriorityBadge priority={task.priority} />
+                          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>{task.id.toUpperCase()}</span>
+                          <span className="truncate" style={{ fontWeight: 500, flex: 1, fontSize: 13 }}>{task.title}</span>
+                          {taskBlockers.length > 0 && <span className="pill pill-warn" style={{ fontSize: 10, flexShrink: 0 }}><Icon name="clock" size={9} /> blocked</span>}
+                          <ProjectChip project={proj} />
+                          <DueChip date={task.dueDate} small />
+                          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', flexShrink: 0 }}>{task.estimate || 0}h</span>
+                        </div>
+                        {item.reason && (
+                          <div style={{ paddingLeft: 22, marginTop: 3, fontSize: 11, color: 'var(--fg-4)', fontStyle: 'italic', lineHeight: 1.4 }}>
+                            {item.reason}
+                          </div>
+                        )}
+                      </label>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          {/* Watchlist */}
+          {watchlist.length > 0 && (() => {
+            const TYPE_CFG = {
+              risk:     { label: 'Risk',     icon: 'warn',     color: 'var(--warn)',   pill: 'pill-warn' },
+              question: { label: 'Question', icon: 'circle',   color: 'var(--info)',   pill: 'pill-info' },
+              deadline: { label: 'Deadline', icon: 'clock',    color: 'var(--danger)', pill: 'pill-danger' },
+              task:     { label: 'Blocked',  icon: 'block',    color: 'var(--warn)',   pill: 'pill-warn' },
+            };
+            return (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px 4px', borderTop: '1px solid var(--line)' }}>
+                  <Icon name="bell" size={10} style={{ color: 'var(--fg-4)' }} />
+                  <span className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', fontWeight: 600 }}>Watch</span>
+                </div>
+                {watchlist.map((w, i) => {
+                  const cfg = TYPE_CFG[w.type] || TYPE_CFG.risk;
+                  const isExpanded = expandedWatchIdx === i;
+
+                  // Look up full record
+                  const risk     = w.type === 'risk'     ? state.risks.find(r => r.id === w.id) : null;
+                  const question = w.type === 'question' ? (state.notes || []).find(n => n.id === w.id) : null;
+                  const project  = w.type === 'deadline' ? state.projects.find(p => p.id === w.id) : null;
+                  const task     = w.type === 'task'     ? state.tasks.find(t => t.id === w.id) : null;
+                  const riskProj = risk ? state.projects.find(p => p.id === risk.projectId) : null;
+                  const qProj    = question ? state.projects.find(p => p.id === (question.projectId || (question.projectIds || [])[0])) : null;
+                  const taskProj = task ? state.projects.find(p => p.id === task.projectId) : null;
+
+                  return (
+                    <div key={i} style={{ borderTop: '1px solid var(--line)' }}>
+                      {/* Collapsed row — always visible */}
+                      <div
+                        onClick={() => setExpandedWatchIdx(isExpanded ? null : i)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', cursor: 'pointer' }}
+                      >
+                        <Icon name={cfg.icon} size={12} style={{ color: cfg.color, flexShrink: 0 }} />
+                        <span className={`pill ${cfg.pill}`} style={{ fontSize: 9.5, flexShrink: 0 }}>{cfg.label}</span>
+                        <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--fg-1)', flex: 1, minWidth: 0 }} className="truncate">{w.title}</span>
+                        {w.note && !isExpanded && <span style={{ fontSize: 11, color: 'var(--fg-4)', flexShrink: 0, maxWidth: 200 }} className="truncate">{w.note}</span>}
+                        <Icon name={isExpanded ? 'chevronD' : 'chevronR'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                      </div>
+
+                      {/* Expanded detail */}
+                      {isExpanded && (
+                        <div style={{ margin: '0 14px 10px', padding: '10px 12px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12 }}>
+                          {/* AI note */}
+                          {w.note && (
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 10, padding: '6px 8px', background: 'oklch(60% 0.15 280 / 0.06)', borderRadius: 4, border: '1px solid oklch(60% 0.15 280 / 0.12)' }}>
+                              <Icon name="bolt" size={10} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+                              <span style={{ color: 'var(--fg-3)', fontStyle: 'italic', lineHeight: 1.45 }}>{w.note}</span>
+                            </div>
+                          )}
+
+                          {risk && (
+                            <>
+                              <div className="pq-meta" style={{ paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--line)' }}>
+                                <span className={`pill ${risk.severity * risk.likelihood >= 12 ? 'pill-danger' : risk.severity * risk.likelihood >= 6 ? 'pill-warn' : 'pill-ok'}`} style={{ fontWeight: 700 }}>
+                                  Score {risk.severity * risk.likelihood}
+                                </span>
+                                <span className="pq-meta-sep" />
+                                <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>S{risk.severity}/5 × L{risk.likelihood}/5</span>
+                                <span className="pq-meta-sep" />
+                                <span className={`pill pill-${risk.status === 'open' ? 'warn' : risk.status === 'monitoring' ? 'info' : 'ok'}`} style={{ textTransform: 'capitalize' }}>{risk.status}</span>
+                                {riskProj && <><span className="pq-meta-sep" /><ProjectChip project={riskProj} /></>}
+                              </div>
+                              {risk.mitigation && (
+                                <div style={{ marginBottom: 8 }}>
+                                  <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginBottom: 3 }}>Mitigation</div>
+                                  <div style={{ color: 'var(--fg-2)', lineHeight: 1.5 }}>{risk.mitigation}</div>
+                                </div>
+                              )}
+                              {risk.reviewDate && (
+                                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <Icon name="clock" size={10} />Next review: {fmtDate(risk.reviewDate)}
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {question && (
+                            <>
+                              <div className="pq-meta" style={{ paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--line)' }}>
+                                {qProj && <><ProjectChip project={qProj} /><span className="pq-meta-sep" /></>}
+                                <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>Open {fmtRelative(question.date)}</span>
+                                {question.resolved && <><span className="pq-meta-sep" /><span className="pill pill-ok">resolved</span></>}
+                              </div>
+                              {question.body
+                                ? <div style={{ color: 'var(--fg-2)', lineHeight: 1.5 }}>{question.body}</div>
+                                : <div style={{ color: 'var(--fg-4)', fontStyle: 'italic' }}>No description added.</div>
+                              }
+                            </>
+                          )}
+
+                          {project && (
+                            <>
+                              <div className="pq-meta" style={{ paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--line)' }}>
+                                <ProjectChip project={project} />
+                                <span className="pq-meta-sep" />
+                                <span className={`pill pill-${project.status === 'blocked' ? 'danger' : project.status === 'at-risk' ? 'warn' : 'ok'}`} style={{ textTransform: 'capitalize' }}>{project.status}</span>
+                                {project.dueDate && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>Due {fmtDate(project.dueDate)}</span></>}
+                              </div>
+                              {project.objective
+                                ? <div style={{ color: 'var(--fg-2)', lineHeight: 1.5 }}>{project.objective}</div>
+                                : <div style={{ color: 'var(--fg-4)', fontStyle: 'italic' }}>No objective set.</div>
+                              }
+                            </>
+                          )}
+
+                          {task && (
+                            <>
+                              <div className="pq-meta" style={{ paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--line)' }}>
+                                <PriorityBadge priority={task.priority} />
+                                <span className="pq-meta-sep" />
+                                <StatusDot status={task.status} />
+                                <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', textTransform: 'capitalize' }}>{task.status}</span>
+                                {taskProj && <><span className="pq-meta-sep" /><ProjectChip project={taskProj} /></>}
+                                {task.dueDate && <><span className="pq-meta-sep" /><DueChip date={task.dueDate} small /></>}
+                                {task.estimate > 0 && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{task.estimate}h</span></>}
+                              </div>
+                              {state.blockers.filter(b => b.taskId === task.id).length > 0 && (
+                                <div style={{ marginBottom: 4 }}>
+                                  <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginBottom: 4 }}>Blockers</div>
+                                  {state.blockers.filter(b => b.taskId === task.id).map(b => (
+                                    <div key={b.id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 4, padding: '5px 8px', background: 'oklch(55% 0.2 55 / 0.06)', borderRadius: 4, border: '1px solid oklch(55% 0.2 55 / 0.15)' }}>
+                                      <Icon name="clock" size={10} style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }} />
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ color: 'var(--fg-2)', lineHeight: 1.4 }}>{b.description}</div>
+                                        {b.waitingOn && b.waitingOn !== '—' && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 2 }}>Waiting on: {b.waitingOn} · {fmtRelative(b.since)}</div>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {task.description && <div style={{ color: 'var(--fg-3)', lineHeight: 1.5, marginTop: 4 }}>{task.description}</div>}
+                            </>
+                          )}
+
+                          {/* Fallback if id not found */}
+                          {!risk && !question && !project && !task && (
+                            <div style={{ color: 'var(--fg-4)', fontStyle: 'italic' }}>Details not available.</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Deferred — tasks AI dropped from the plan */}
+          {deferred.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px 4px', borderTop: '1px solid var(--line)' }}>
+                <Icon name="clock" size={10} style={{ color: 'var(--fg-4)' }} />
+                <span className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', fontWeight: 600 }}>Deferred · capacity limit</span>
+              </div>
+              {deferred.map((d, i) => {
+                const task = state.tasks.find(t => t.id === d.taskId);
+                if (!task) return null;
+                const proj = state.projects.find(p => p.id === task.projectId);
+                const taskBlockers = state.blockers.filter(b => b.taskId === task.id);
+                const suggestLabel = { tomorrow: 'Tomorrow', 'this-week': 'This week', 'next-week': 'Next week' }[d.suggestDate] || d.suggestDate;
+                const isExpanded = expandedDeferredIdx === i;
+                return (
+                  <div key={i} style={{ borderTop: '1px solid var(--line)' }}>
+                    <div
+                      onClick={() => setExpandedDeferredIdx(isExpanded ? null : i)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', cursor: 'pointer', opacity: 0.8 }}
+                    >
+                      <Icon name={isExpanded ? 'chevronD' : 'chevronR'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                      <PriorityBadge priority={task.priority} />
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>{task.id.toUpperCase()}</span>
+                      <span className="truncate" style={{ fontSize: 12.5, color: 'var(--fg-3)', flex: 1 }}>{task.title}</span>
+                      {proj && <ProjectChip project={proj} />}
+                      {d.reason && !isExpanded && <span style={{ fontSize: 11, color: 'var(--fg-4)', fontStyle: 'italic', flexShrink: 0, maxWidth: 180 }} className="truncate">{d.reason}</span>}
+                      {suggestLabel && <span className="pill pill-ghost" style={{ fontSize: 9.5, flexShrink: 0 }}>→ {suggestLabel}</span>}
+                    </div>
+                    {isExpanded && (
+                      <div style={{ margin: '0 14px 10px', padding: '10px 12px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12 }}>
+                        {d.reason && (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 10, padding: '6px 8px', background: 'oklch(60% 0.15 280 / 0.06)', borderRadius: 4, border: '1px solid oklch(60% 0.15 280 / 0.12)' }}>
+                            <Icon name="clock" size={10} style={{ color: 'var(--fg-4)', flexShrink: 0, marginTop: 1 }} />
+                            <span style={{ color: 'var(--fg-3)', fontStyle: 'italic', lineHeight: 1.45 }}>{d.reason}{suggestLabel ? ` — suggest ${suggestLabel.toLowerCase()}.` : ''}</span>
+                          </div>
+                        )}
+                        <div className="pq-meta" style={{ paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--line)' }}>
+                          <PriorityBadge priority={task.priority} />
+                          <span className="pq-meta-sep" />
+                          <StatusDot status={task.status} />
+                          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', textTransform: 'capitalize' }}>{task.status}</span>
+                          {proj && <><span className="pq-meta-sep" /><ProjectChip project={proj} /></>}
+                          {task.dueDate && <><span className="pq-meta-sep" /><DueChip date={task.dueDate} small /></>}
+                          {task.estimate > 0 && <><span className="pq-meta-sep" /><span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{task.estimate}h</span></>}
+                        </div>
+                        {task.description && <div style={{ color: 'var(--fg-2)', lineHeight: 1.5, marginBottom: taskBlockers.length ? 8 : 0 }}>{task.description}</div>}
+                        {taskBlockers.length > 0 && (
+                          <div>
+                            <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginBottom: 4 }}>Blockers</div>
+                            {taskBlockers.map(b => (
+                              <div key={b.id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '5px 8px', background: 'oklch(55% 0.2 55 / 0.06)', borderRadius: 4, border: '1px solid oklch(55% 0.2 55 / 0.15)', marginBottom: 4 }}>
+                                <Icon name="clock" size={10} style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }} />
+                                <div>
+                                  <div style={{ color: 'var(--fg-2)' }}>{b.description}</div>
+                                  {b.waitingOn && b.waitingOn !== '—' && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 2 }}>Waiting on: {b.waitingOn}</div>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={(e) => { e.stopPropagation(); toggle(task.id); setExpandedDeferredIdx(null); }}>
+                          + Add to today's plan
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Suggested actions */}
+          {suggestedActions.filter((_, i) => !skippedActions.has(i)).length > 0 && (
+            <div style={{ marginTop: 14, padding: '10px 14px', background: 'oklch(60% 0.15 280 / 0.06)', borderRadius: 8, border: '1px solid oklch(60% 0.15 280 / 0.15)' }}>
+              <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)', marginBottom: 8 }}>
+                Suggested actions
+              </div>
+              {suggestedActions.map((action, idx) => {
+                if (skippedActions.has(idx)) return null;
+                const accepted = acceptedActions.has(idx);
+                return (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: idx < suggestedActions.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                    <span className="pill" style={{ fontSize: 10, flexShrink: 0 }}>{ACTION_LABELS[action.type] || action.type}</span>
+                    <span style={{ flex: 1, fontSize: 12, color: 'var(--fg-2)' }}>{action.label}</span>
+                    {accepted
+                      ? <span style={{ fontSize: 11, color: 'var(--ok)', fontWeight: 600 }}>✓ Added</span>
+                      : <>
+                          <button className="btn btn-sm btn-primary" onClick={() => applyAction(action, idx)}>Accept</button>
+                          <button className="btn btn-sm" onClick={() => setSkippedActions(prev => new Set([...prev, idx]))}>Skip</button>
+                        </>
+                    }
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Manual picker — other tasks */}
+          {otherTasks.length > 0 && (
+            <details style={{ marginTop: 10 }}>
+              <summary style={{
+                cursor: 'pointer', padding: '7px 14px', borderTop: '1px solid var(--line)', listStyle: 'none',
+                display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none',
+              }}>
+                <Icon name="chevronR" size={10} style={{ color: 'var(--fg-4)' }} />
+                <span className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', fontWeight: 600 }}>
+                  Add more tasks ({otherTasks.length})
+                </span>
+              </summary>
+              <div className="plan-list" style={{ marginBottom: 0 }}>
+                {otherTasks.map(t => {
+                  const proj = state.projects.find(p => p.id === t.projectId);
+                  const isSelected = picked.includes(t.id);
+                  return (
+                    <label key={t.id} className={`plan-row ${isSelected ? 'selected' : ''}`}>
+                      <input type="checkbox" checked={isSelected} onChange={() => toggle(t.id)} />
+                      <PriorityBadge priority={t.priority} />
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>{t.id.toUpperCase()}</span>
+                      <span className="truncate" style={{ fontWeight: 500 }}>{t.title}</span>
+                      <ProjectChip project={proj} />
+                      <DueChip date={t.dueDate} small />
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>{t.estimate || 0}h</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+
+          {/* Feedback / refine */}
+          <div style={{ marginTop: 16, paddingTop: 14, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, borderTop: '1px solid var(--line)' }}>
+            <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 6 }}>
+              Refine with AI
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                className="input"
+                style={{ flex: 1, fontSize: 12.5 }}
+                placeholder={`e.g. "The API task is blocked on legal" or "Customer demo moved to Thursday"`}
+                value={feedback}
+                onChange={e => setFeedback(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); refinePlan(); } }}
+              />
+              <button className="btn btn-sm btn-primary" onClick={refinePlan} disabled={!feedback.trim()}>
+                <Icon name="bolt" size={10} /> Refine
+              </button>
+            </div>
+            <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 5 }}>
+              Tell the assistant what changed or what's blocked — it can suggest adding blockers, tasks, risks, and more.
+            </div>
+          </div>
+        </>
+      )}
+
+    </div>
   );
 }
 
@@ -753,4 +1428,4 @@ function EndDayModal({ state, onClose }) {
   );
 }
 
-Object.assign(window, { Today, PlanMyDayModal, EndDayModal, TaskReadOnlyModal });
+Object.assign(window, { Today, PlanMyDaySection, EndDayModal, TaskReadOnlyModal });

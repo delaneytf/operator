@@ -152,7 +152,7 @@ function DecisionRow({ note, project, expanded, onToggleExpand, onEdit }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {note.pinned && <Icon name="pin" size={10} style={{ color: 'var(--warn)', opacity: 0.8 }} />}
         </div>
-        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="truncate" style={{ fontWeight: 500, fontSize: 13 }}>{note.title}</span>
         </div>
         <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', display: 'flex', alignItems: 'center' }}>
@@ -174,6 +174,8 @@ function DecisionRow({ note, project, expanded, onToggleExpand, onEdit }) {
         <div className="pq-detail" onClick={(e) => e.stopPropagation()}>
           <div className="pq-meta-row">
             <div className="pq-meta">
+              <span className="pq-meta-item mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>D-{note.id.replace(/^n-/, '')}</span>
+              <span className="pq-meta-sep" />
               <span className="pq-meta-item">
                 {note.reversibility === 'irreversible'
                   ? <span className="pill pill-danger" style={{ fontSize: 10, padding: '1px 6px' }}>irreversible</span>

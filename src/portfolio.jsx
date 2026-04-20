@@ -18,7 +18,16 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
   const { overloaded, conflicts } = detectConflicts(state);
   const [activeDayDate, setActiveDayDate] = React.useState(null);
   const [expandedOverload, setExpandedOverload] = React.useState(null);
+  const [expandedRiskId, setExpandedRiskId] = React.useState(null);
+  const [showTopRisks, setShowTopRisks] = React.useState(true);
+  const [taskDetailId, setTaskDetailId] = React.useState(null);
+  const RR   = window.RiskRow;
+  const TROM = window.TaskReadOnlyModal;
+  const enabledFields = state?.meta?.riskFields || window.RISK_FIELDS_DEFAULT || ['category', 'response'];
   const activeDay = workload.find((b) => b.date === activeDayDate) || null;
+
+  const taskDetail = taskDetailId ? state.tasks.find((t) => t.id === taskDetailId) : null;
+  const taskDetailProject = taskDetail ? projects.find((p) => p.id === taskDetail.projectId) : null;
 
   // metrics
   const allTasks = state.tasks;
@@ -28,6 +37,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
   const totalRiskPeak = Math.max(0, ...state.risks.filter((r) => r.status !== 'closed').map((r) => r.severity * r.likelihood));
 
   return (
+    <>
     <div className="content-narrow">
       <div className="row-flex-sb" style={{ marginBottom: 14 }}>
         <div>
@@ -77,16 +87,18 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
           <div className="workload">
             {workload.map((b, i) => {
               const h = b.hours;
-              const cls = h > 6 ? 'over' : h > 4 ? 'med' : 'ok';
+              const cls = h > 6 ? 'over' : h > 4 ? 'med' : h > 0 ? 'ok' : 'idle';
               const isWeekend = b.day.getDay() === 0 || b.day.getDay() === 6;
               const isToday = i === 0;
               const isActive = activeDayDate === b.date;
-              const barH = Math.max(3, Math.round((h / Math.max(maxHours, 8)) * 56));
+              const barH = h > 0
+                ? Math.max(10, Math.round((h / Math.max(maxHours, 8)) * 56))
+                : 6;
               return (
                 <div key={b.date} className={`workload-day workload-day-btn ${isActive ? 'active' : ''}`}
                   onClick={() => setActiveDayDate(isActive ? null : b.date)}>
                   <div style={{ fontSize: 9, color: isActive ? 'var(--accent)' : 'var(--fg-3)', fontFamily: 'var(--font-mono)', fontWeight: isActive ? 700 : 400 }}>{h || ''}</div>
-                  <div className={`workload-bar ${cls} ${isToday ? 'today' : ''}`} style={{ height: `${barH}px`, opacity: isActive ? 1 : 0.85 }} />
+                  <div className={`workload-bar ${cls} ${isToday ? 'today' : ''}`} style={{ height: `${barH}px`, opacity: isActive ? 1 : (h === 0 ? 0.35 : 0.85) }} />
                   <div className={`workload-label ${isToday ? 'is-today' : ''} ${isWeekend ? 'is-weekend' : ''} ${isActive ? 'is-active' : ''}`}>
                     {b.day.toLocaleDateString('en-US', { weekday: 'short' })[0]}{b.day.getDate()}
                   </div>
@@ -106,7 +118,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
               ) : activeDay.tasks.map((t) => {
                 const p = projects.find((pp) => pp.id === t.projectId);
                 return (
-                  <div key={t.id} className="workload-task-row" onClick={() => onOpenTask && onOpenTask(t.id)}>
+                  <div key={t.id} className="workload-task-row" onClick={() => setTaskDetailId(t.id)}>
                     <PriorityBadge priority={t.priority} />
                     <span style={{ flex: 1, minWidth: 0 }} className="truncate">{t.title}</span>
                     {p && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>{p.code}</span>}
@@ -173,13 +185,15 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
 
       {/* Cross-project top risks — no heatmap here (lives in Risks tab) */}
       <div className="card" style={{ marginBottom: 22 }}>
-        <div className="card-head">
-          <span className="card-head-title">Top risks · all projects</span>
-          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
+        <button className="card-head" style={{ width: '100%', border: 'none', textAlign: 'left', cursor: 'pointer', color: 'var(--fg-3)' }}
+          onClick={() => setShowTopRisks((v) => !v)}>
+          <span className="card-head-title" style={{ color: 'var(--fg-3)' }}>Top risks · all projects</span>
+          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>
             {state.risks.filter((r) => r.status !== 'closed').length} open · sorted by severity×likelihood
           </span>
-        </div>
-        <div style={{ padding: '2px 0' }}>
+          <Icon name={showTopRisks ? 'chevronD' : 'chevronR'} size={10} style={{ marginLeft: 8 }} />
+        </button>
+        {showTopRisks && <div>
           {state.risks.filter((r) => r.status !== 'closed').length === 0 ? (
             <EmptyState title="No open risks" icon="check" />
           ) : state.risks
@@ -188,22 +202,17 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
             .slice(0, 5)
             .map((r) => {
               const p = projects.find((pp) => pp.id === r.projectId);
-              return (
-                <div key={r.id} className="risk-row" style={{ cursor: 'pointer' }} onClick={() => onOpenProject(r.projectId)}>
-                  <div className={`risk-sev risk-sev-${Math.ceil((r.severity * r.likelihood) / 5)}`}>{r.severity * r.likelihood}</div>
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{r.title}</div>
-                    <div style={{ color: 'var(--fg-3)', fontSize: 11, marginTop: 2 }} className="mono truncate">
-                      {r.mitigation}
-                    </div>
-                  </div>
-                  <ProjectChip project={p} onClick={() => onOpenProject(p.id)} />
-                  <Pill tone={r.status === 'monitoring' ? 'info' : 'warn'}>{r.status}</Pill>
-                  <span />
-                </div>
-              );
+              return RR ? (
+                <RR key={r.id} risk={r}
+                  project={p}
+                  expanded={expandedRiskId === r.id}
+                  onToggleExpand={() => setExpandedRiskId((prev) => prev === r.id ? null : r.id)}
+                  onEdit={() => onOpenProject(r.projectId)}
+                  enabledFields={enabledFields}
+                  hideFromRow={['category', 'response', 'reviewDate']} />
+              ) : null;
             })}
-        </div>
+        </div>}
       </div>
 
       {/* Project rows — horizontal stacked */}
@@ -241,7 +250,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
       {/* Done projects — collapsible */}
       {sortedDone.length > 0 && (
         <div className="card" style={{ marginBottom: 22, opacity: 0.85 }}>
-          <button className="card-head" style={{ width: '100%', cursor: 'pointer', background: 'none', border: 'none', textAlign: 'left' }}
+          <button className="card-head" style={{ width: '100%', cursor: 'pointer', border: 'none', textAlign: 'left', color: 'var(--fg-3)' }}
             onClick={() => setDoneExpanded((x) => !x)}>
             <span className="card-head-title"><Icon name="check" size={11} /> Done projects</span>
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{sortedDone.length}</span>
@@ -255,6 +264,18 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
         </div>
       )}
     </div>
+
+    {/* Read-only task detail modal */}
+    {taskDetailId && TROM && (
+      <TROM
+        taskId={taskDetailId}
+        state={state}
+        onClose={() => setTaskDetailId(null)}
+        onEdit={(id) => { setTaskDetailId(null); onOpenTask && onOpenTask(id || taskDetailId); }}
+        onJumpTo={(id) => setTaskDetailId(id)}
+      />
+    )}
+    </>
   );
 }
 

@@ -1054,34 +1054,192 @@ function NotesTab({ project, notes }) {
 
 
 function RisksTab({ project, risks, state }) {
-  const [expandedId, setExpandedId] = React.useState(null);
-  const [modalId, setModalId] = React.useState(null);
-  const [showModal, setShowModal] = React.useState(false);
+  const [expandedId,      setExpandedId]      = React.useState(null);
+  const [modalId,         setModalId]         = React.useState(null);
+  const [showModal,       setShowModal]       = React.useState(false);
+  const [showFieldsPanel, setShowFieldsPanel] = React.useState(false);
+  const [showGuide,       setShowGuide]       = React.useState(false);
+  const fieldsPanelRef = React.useRef(null);
 
-  const RR = window.RiskRow;
-  const RM = window.RiskModal;
+  const RR  = window.RiskRow;
+  const RM  = window.RiskModal;
+  const RGM = window.RiskGuideModal;
   const modalState = state || { projects: [project], risks, tasks: [], notes: [], meetings: [], blockers: [] };
 
-  const openModal = (id) => { setModalId(id || null); setShowModal(true); };
+  const enabledFields = state?.meta?.riskFields || window.RISK_FIELDS_DEFAULT || ['category', 'response'];
+
+  React.useEffect(() => {
+    if (!showFieldsPanel) return;
+    const handler = (e) => {
+      if (fieldsPanelRef.current && !fieldsPanelRef.current.contains(e.target))
+        setShowFieldsPanel(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showFieldsPanel]);
+
+  const toggleField = (key) => {
+    const next = enabledFields.includes(key)
+      ? enabledFields.filter((k) => k !== key)
+      : [...enabledFields, key];
+    actions.setRiskFields(next);
+  };
+
+  const openModal  = (id) => { setModalId(id || null); setShowModal(true); };
   const toggleExpand = (id) => setExpandedId((prev) => prev === id ? null : id);
 
-  const open = risks.filter((r) => r.status !== 'closed').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
+  const open   = risks.filter((r) => r.status !== 'closed').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
   const closed = risks.filter((r) => r.status === 'closed');
+
+  const critCount    = open.filter((r) => r.severity * r.likelihood >= 16).length;
+  const highCount    = open.filter((r) => { const s = r.severity * r.likelihood; return s >= 10 && s < 16; }).length;
+  const medCount     = open.filter((r) => { const s = r.severity * r.likelihood; return s >= 6 && s < 10; }).length;
+  const lowCount     = open.filter((r) => r.severity * r.likelihood < 6).length;
+  const monCount     = open.filter((r) => r.status === 'monitoring').length;
+  const avgScoreNum  = open.length > 0 ? open.reduce((s, r) => s + r.severity * r.likelihood, 0) / open.length : 0;
+  const avgScoreFmt  = open.length > 0 ? avgScoreNum.toFixed(1) : '—';
+  const pressureLabel = avgScoreNum >= 16 ? 'critical' : avgScoreNum >= 10 ? 'high pressure' : avgScoreNum >= 6 ? 'moderate pressure' : 'low pressure';
+  const peakRisk     = open[0];
 
   const renderRiskRow = (r) => RR ? (
     <RR key={r.id} risk={r}
       project={project}
       expanded={expandedId === r.id}
       onToggleExpand={() => toggleExpand(r.id)}
-      onEdit={() => openModal(r.id)} />
+      onEdit={() => openModal(r.id)}
+      enabledFields={enabledFields} />
   ) : null;
 
+  const monoSm = { fontSize: 9.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)' };
+  const bigNum = { fontSize: 30, fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: 'var(--fg-1)' };
+
+  const riskGradient = 'linear-gradient(to right, oklch(58% 0.15 145), oklch(74% 0.17 80), oklch(67% 0.19 45), oklch(56% 0.21 24))';
+  const fillPct = Math.min((avgScoreNum / 25) * 100, 100);
+
+  const buckets = [
+    { label: 'Critical', count: critCount, color: 'oklch(56% 0.21 24)'  },
+    { label: 'High',     count: highCount, color: 'oklch(67% 0.19 45)'  },
+    { label: 'Medium',   count: medCount,  color: 'oklch(74% 0.17 80)'  },
+    { label: 'Low',      count: lowCount,  color: 'oklch(58% 0.15 145)' },
+    { label: 'Monitor',  count: monCount,  color: 'var(--info)'          },
+  ];
+
   return (
-    <div className="grid g-2">
-      <div className="card">
+    <>
+      {/* Overview — breakdown card + avg score card + heatmap */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'stretch' }}>
+        {/* Left column: two stacked cards — 2/3 width */}
+        <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Risk Breakdown */}
+          <div className="card" style={{ padding: '16px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+              <span style={monoSm}>Risk breakdown</span>
+              <span style={{ ...monoSm, textTransform: 'none', letterSpacing: 0 }}>{risks.length} total · {open.length} open · {closed.length} closed</span>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <span style={bigNum}>{open.length}</span>
+              <span style={{ ...monoSm, marginLeft: 8 }}>open risks</span>
+            </div>
+            {/* Segmented bar */}
+            <div style={{ display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden', gap: 2, marginBottom: 14 }}>
+              {open.length === 0
+                ? <div style={{ flex: 1, background: 'var(--line)' }} />
+                : buckets.slice(0, 4).map((b) => b.count > 0
+                    ? <div key={b.label} style={{ flex: b.count, background: b.color }} />
+                    : null)
+              }
+            </div>
+            {/* Bucket counts */}
+            <div style={{ display: 'flex' }}>
+              {buckets.map((b, i) => (
+                <div key={b.label} style={{ flex: 1, paddingLeft: 8, borderLeft: `2px solid ${b.color}`, marginLeft: i > 0 ? 8 : 0 }}>
+                  <div style={{ ...monoSm, fontSize: 9, marginBottom: 3 }}>{b.label}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1, color: b.count > 0 ? b.color : 'var(--fg-4)', fontVariantNumeric: 'tabular-nums' }}>{b.count}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Avg Score */}
+          <div className="card" style={{ padding: '16px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+              <span style={monoSm}>Avg score</span>
+              <span style={{ ...monoSm, textTransform: 'none', letterSpacing: 0 }}>across open risks</span>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <span style={bigNum}>{avgScoreFmt}</span>
+              <span style={{ ...monoSm, marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>/ 25 — {pressureLabel}</span>
+            </div>
+            {/* Gauge bar */}
+            <div style={{ position: 'relative', height: 5, borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
+              <div style={{ position: 'absolute', inset: 0, background: riskGradient, opacity: 0.2 }} />
+              <div style={{ position: 'absolute', inset: 0, background: riskGradient, clipPath: `inset(0 ${100 - fillPct}% 0 0 round 3px)` }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              {['0 low', '10 med', '16 high', '25 crit'].map((t) => (
+                <span key={t} style={{ ...monoSm, fontSize: 9, textTransform: 'none', letterSpacing: 0 }}>{t}</span>
+              ))}
+            </div>
+            {peakRisk && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+                <span style={{ ...monoSm, textTransform: 'none', letterSpacing: 0 }}>Peak · {peakRisk.title}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--err)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>{peakRisk.severity * peakRisk.likelihood}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: heatmap card — 1/3 width */}
+        <div className="card" style={{ flex: 1, padding: '16px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ ...monoSm, marginBottom: 10 }}>Severity × Likelihood</div>
+          <div className="risk-matrix-compact" style={{ flex: 1 }}>
+            <RiskMatrix risks={open} />
+          </div>
+        </div>
+      </div>
+
+      {/* Register — full width */}
+      <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-head">
-          <span className="card-head-title">Register</span>
-          <button className="btn btn-sm btn-primary" onClick={() => openModal(null)}><Icon name="plus" size={11} /> New risk</button>
+          <span className="card-head-title">Risk register</span>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button className="btn btn-sm" onClick={() => setShowGuide(true)}>
+              <Icon name="circle" size={11} /> Guide
+            </button>
+            <div style={{ position: 'relative' }} ref={fieldsPanelRef}>
+              <button
+                className={`btn btn-sm${showFieldsPanel ? ' btn-primary' : ''}`}
+                onClick={() => setShowFieldsPanel((v) => !v)}
+              >
+                <Icon name="settings" size={11} /> Fields{enabledFields.length > 0 ? ` · ${enabledFields.length}` : ''}
+              </button>
+              {showFieldsPanel && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 200,
+                  background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8,
+                  padding: '12px 14px', minWidth: 260, boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
+                }}>
+                  <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 10 }}>
+                    Optional fields — affects all views
+                  </div>
+                  {(window.RISK_FIELDS_ALL || []).map((f) => (
+                    <label key={f.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={enabledFields.includes(f.key)}
+                        onChange={() => toggleField(f.key)} style={{ marginTop: 2, flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-1)', lineHeight: 1.3 }}>{f.label}</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--fg-4)', lineHeight: 1.4 }}>{f.hint}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button className="btn btn-sm btn-primary" onClick={() => openModal(null)}>
+              <Icon name="plus" size={11} /> New risk
+            </button>
+          </div>
         </div>
         {open.length === 0 && closed.length === 0
           ? <EmptyState title="No risks yet" icon="check" />
@@ -1089,26 +1247,22 @@ function RisksTab({ project, risks, state }) {
         {open.length > 0 && open.map(renderRiskRow)}
         {closed.length > 0 && (
           <>
-            <div className="tgroup-head"><span style={{ color: 'var(--ok)' }}>Closed</span><span className="tgroup-head-count">{closed.length}</span></div>
+            <div className="tgroup-head">
+              <span style={{ color: 'var(--ok)' }}>Closed</span>
+              <span className="tgroup-head-count">{closed.length}</span>
+            </div>
             {closed.map(renderRiskRow)}
           </>
         )}
       </div>
-      <div className="card">
-        <div className="card-head">
-          <span className="card-head-title">Heatmap</span>
-          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{open.length} open</span>
-        </div>
-        <div style={{ padding: 18 }}>
-          <RiskMatrix risks={open} />
-        </div>
-      </div>
+
       {showModal && RM && (
         <RM riskId={modalId} state={modalState}
           defaults={{ projectId: project.id }}
           onClose={() => { setShowModal(false); setModalId(null); }} />
       )}
-    </div>
+      {showGuide && RGM && <RGM onClose={() => setShowGuide(false)} />}
+    </>
   );
 }
 

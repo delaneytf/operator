@@ -9,7 +9,7 @@ const d = (offset) => {
 };
 
 const SEED = {
-  version: 8,
+  version: 10,
   meta: {
     theme: 'dark',
     density: 'compact',
@@ -21,6 +21,7 @@ const SEED = {
     lastPlanDate: null,
     plannedToday: [],
     yesterdayShipped: [],
+    riskFields: ['category', 'response'],
     integrations: {
       jira: { connected: true, site: 'acme.atlassian.net', user: 'you@acme.co', syncedAt: d(0) },
       confluence: { connected: true, site: 'acme.atlassian.net', user: 'you@acme.co', syncedAt: d(0) },
@@ -198,19 +199,19 @@ const SEED = {
     { id: 'n-40', projectId: 'p-nova', kind: 'question', title: 'Bet sizing — 60/30/10 or equal?', body: 'Lean toward weighted. Ask advisor.', date: d(-3), tags: ['planning'] },
   ],
   risks: [
-    { id: 'r-1', projectId: 'p-atlas', title: 'Beta pool too small for signal', severity: 4, likelihood: 3, mitigation: 'Expand waitlist sources; reserve 10 slots for warm intros.', owner: 'You', status: 'open', createdAt: d(-10) },
-    { id: 'r-2', projectId: 'p-atlas', title: 'Pricing page conversion stalls', severity: 3, likelihood: 3, mitigation: 'A/B test within week 1; rollback plan in place.', owner: 'You', status: 'open', createdAt: d(-5) },
-    { id: 'r-3', projectId: 'p-atlas', title: 'Engineering capacity during launch week', severity: 4, likelihood: 2, mitigation: 'Freeze non-launch work T-7; oncall rota drafted.', owner: 'You', status: 'monitoring', createdAt: d(-8) },
+    { id: 'r-1', projectId: 'p-atlas', title: 'Beta pool too small for signal', severity: 4, likelihood: 3, category: 'Resource', response: 'Reduce', mitigation: 'Expand waitlist sources; reserve 10 slots for warm intros.', trigger: 'Beta invite acceptance rate drops below 60% or fewer than 30 signups by day 3.', impact: 'Insufficient data to validate pricing or retention hypotheses; delays go/no-go decision by 2+ weeks.', owner: 'You', status: 'open', createdAt: d(-10) },
+    { id: 'r-2', projectId: 'p-atlas', title: 'Pricing page conversion stalls', severity: 3, likelihood: 3, category: 'Financial', response: 'Reduce', mitigation: 'A/B test within week 1; rollback plan in place.', trigger: 'Pricing page conversion below 2% for 48h after launch.', impact: 'Pipeline growth slows; CAC increases if paid acquisition required to compensate.', owner: 'You', status: 'open', createdAt: d(-5) },
+    { id: 'r-3', projectId: 'p-atlas', title: 'Engineering capacity during launch week', severity: 4, likelihood: 2, category: 'Resource', response: 'Reduce', mitigation: 'Freeze non-launch work T-7; oncall rota drafted.', trigger: 'Any engineer pulled for non-launch work within T-5 of launch date.', contingency: 'Delay launch by 1 week and re-staff; communicate proactively to beta waitlist.', owner: 'You', status: 'monitoring', createdAt: d(-8) },
 
-    { id: 'r-10', projectId: 'p-helios', title: 'Market window closes before term sheet', severity: 5, likelihood: 3, mitigation: 'Compress outreach; book 20 meetings in first 2 weeks.', owner: 'You', status: 'open', createdAt: d(-14) },
-    { id: 'r-11', projectId: 'p-helios', title: 'Key metric (retention) dips before close', severity: 5, likelihood: 2, mitigation: 'Lock retention initiatives; weekly metric review.', owner: 'You', status: 'monitoring', createdAt: d(-12) },
-    { id: 'r-12', projectId: 'p-helios', title: 'Advisor availability for intros', severity: 3, likelihood: 2, mitigation: 'Confirm 3 advisor intros/week; backup list of 2 angels.', owner: 'You', status: 'open', createdAt: d(-7) },
+    { id: 'r-10', projectId: 'p-helios', title: 'Market window closes before term sheet', severity: 5, likelihood: 3, category: 'External', response: 'Avoid', mitigation: 'Compress outreach; book 20 meetings in first 2 weeks.', trigger: 'Fewer than 8 first meetings booked by end of week 1, or 2+ lead investors pass without feedback.', impact: 'Forces bridge round at worse terms or reduces valuation headroom for Series A.', owner: 'You', status: 'open', createdAt: d(-14) },
+    { id: 'r-11', projectId: 'p-helios', title: 'Key metric (retention) dips before close', severity: 5, likelihood: 2, category: 'Technical', response: 'Reduce', mitigation: 'Lock retention initiatives; weekly metric review.', trigger: 'D30 retention drops more than 3 percentage points in any rolling 2-week window.', contingency: 'Pause fundraise by 2 weeks to run targeted retention intervention; brief lead investors proactively.', owner: 'You', status: 'monitoring', createdAt: d(-12) },
+    { id: 'r-12', projectId: 'p-helios', title: 'Advisor availability for intros', severity: 3, likelihood: 2, category: 'Resource', response: 'Transfer', mitigation: 'Confirm 3 advisor intros/week; backup list of 2 angels.', trigger: 'Any advisor misses two consecutive weekly check-ins without rebooking.', owner: 'You', status: 'open', createdAt: d(-7) },
 
-    { id: 'r-20', projectId: 'p-orbit', title: 'Scheduling slips push synthesis past deadline', severity: 3, likelihood: 4, mitigation: 'Batch interviews M/W/F; cap at 45 min.', owner: 'You', status: 'open', createdAt: d(-5) },
+    { id: 'r-20', projectId: 'p-orbit', title: 'Scheduling slips push synthesis past deadline', severity: 3, likelihood: 4, category: 'Schedule', response: 'Reduce', mitigation: 'Batch interviews M/W/F; cap at 45 min.', trigger: 'Fewer than 10 interviews completed by the end of week 2 of the research sprint.', owner: 'You', status: 'open', createdAt: d(-5) },
 
-    { id: 'r-30', projectId: 'p-vega', title: 'Vendor disappears; need alt', severity: 4, likelihood: 4, mitigation: 'Shortlist of 2 alternates drafted; 2-week decision deadline.', owner: 'You', status: 'open', createdAt: d(-9) },
+    { id: 'r-30', projectId: 'p-vega', title: 'Vendor disappears; need alt', severity: 4, likelihood: 4, category: 'External', response: 'Transfer', mitigation: 'Shortlist of 2 alternates drafted; 2-week decision deadline.', trigger: 'Vendor misses SLA 2x in 30 days, or goes unresponsive for 5+ business days.', contingency: 'Activate alternate vendor from shortlist; accept 1-week data migration lag.', impact: 'Up to 2-week operational disruption; possible data migration cost $5–10k.', owner: 'You', status: 'open', createdAt: d(-9) },
 
-    { id: 'r-40', projectId: 'p-nova', title: 'Plan conflicts with Atlas launch focus', severity: 3, likelihood: 3, mitigation: 'Time-box planning to 1 day/week until launch clears.', owner: 'You', status: 'monitoring', createdAt: d(-4) },
+    { id: 'r-40', projectId: 'p-nova', title: 'Plan conflicts with Atlas launch focus', severity: 3, likelihood: 3, category: 'Schedule', response: 'Accept', mitigation: 'Time-box planning to 1 day/week until launch clears.', trigger: 'Nova planning tasks appear on daily plan more than 2x in any given week.', owner: 'You', status: 'monitoring', createdAt: d(-4) },
   ],
   weeklyReviews: [
     {
@@ -333,6 +334,9 @@ const SEED = {
       createdAt: d(-7),
     },
   ],
+
+  // Daily plan artifacts (keyed by date)
+  dailyPlans: {},
 
   // Chat threads
   chatThreads: [
