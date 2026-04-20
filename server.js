@@ -301,6 +301,11 @@ function getAtlassianAuth(provider) {
   };
 }
 
+// Confluence Cloud uses /wiki/rest/api/; self-hosted Server/DC uses /rest/api/ directly
+function confluenceApiBase(base) {
+  return base.includes('.atlassian.net') ? `${base}/wiki` : base;
+}
+
 // ── Jira sync ─────────────────────────────────────────────────────────────────
 
 app.post('/api/jira/sync', async (req, res) => {
@@ -402,8 +407,9 @@ app.post('/api/confluence/sync', async (req, res) => {
   const { headers, base } = confAuth;
 
   try {
-    // Fetch spaces
-    const spacesRes = await fetch(`${base}/wiki/rest/api/space?limit=50&type=global`, { headers });
+    // Fetch spaces — Cloud uses /wiki prefix, Server/DC does not
+    const confBase = confluenceApiBase(base);
+    const spacesRes = await fetch(`${confBase}/rest/api/space?limit=50&type=global`, { headers });
     if (!spacesRes.ok) throw new Error(`Confluence spaces: ${spacesRes.status} ${await spacesRes.text()}`);
     const spacesData = await spacesRes.json();
     const confluenceSpaces = (spacesData.results || []).map((s) => ({
@@ -414,7 +420,7 @@ app.post('/api/confluence/sync', async (req, res) => {
 
     // Fetch pages with body content
     const pagesRes = await fetch(
-      `${base}/wiki/rest/api/content?type=page&limit=100&expand=body.storage,metadata.labels,version,ancestors,space`,
+      `${confBase}/rest/api/content?type=page&limit=100&expand=body.storage,metadata.labels,version,ancestors,space`,
       { headers }
     );
     if (!pagesRes.ok) throw new Error(`Confluence pages: ${pagesRes.status} ${await pagesRes.text()}`);
@@ -575,7 +581,7 @@ app.get('/api/confluence/spaces', async (req, res) => {
   if (!confAuth) return res.status(400).json({ error: 'Confluence not configured' });
   const { headers, base } = confAuth;
   try {
-    const r = await fetch(`${base}/wiki/rest/api/space?limit=100&type=global`, { headers });
+    const r = await fetch(`${confluenceApiBase(base)}/rest/api/space?limit=100&type=global`, { headers });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     const data = await r.json();
     res.json((data.results || []).map((s) => ({ key: s.key, name: s.name })));
