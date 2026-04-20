@@ -311,11 +311,13 @@ app.post('/api/jira/sync', async (req, res) => {
   const { headers, base } = jiraAuth;
 
   try {
-    // Fetch projects
-    const projRes = await fetch(`${base}/rest/api/3/project/search?maxResults=50`, { headers });
+    // Fetch projects — /rest/api/2/project works on both Cloud and Server/Data Center
+    const projRes = await fetch(`${base}/rest/api/2/project?maxResults=100`, { headers });
     if (!projRes.ok) throw new Error(`Jira projects: ${projRes.status} ${await projRes.text()}`);
     const projData = await projRes.json();
-    const jiraProjects = (projData.values || []).map((p) => ({
+    // Cloud returns { values: [...] }, Server returns [...] directly
+    const projList = Array.isArray(projData) ? projData : (projData.values || []);
+    const jiraProjects = projList.map((p) => ({
       id: `jp-${p.id}`,
       key: p.key,
       name: p.name,
@@ -324,7 +326,7 @@ app.post('/api/jira/sync', async (req, res) => {
 
     // Fetch issues (up to 200, ordered by updated)
     const issuesRes = await fetch(
-      `${base}/rest/api/3/search?jql=order+by+updated+DESC&maxResults=200&fields=summary,status,priority,assignee,reporter,issuetype,customfield_10016,customfield_10028,labels,description,updated,project`,
+      `${base}/rest/api/2/search?jql=order+by+updated+DESC&maxResults=200&fields=summary,status,priority,assignee,reporter,issuetype,customfield_10016,customfield_10028,labels,description,updated,project`,
       { headers }
     );
     if (!issuesRes.ok) throw new Error(`Jira issues: ${issuesRes.status} ${await issuesRes.text()}`);
@@ -554,10 +556,12 @@ app.get('/api/jira/projects', async (req, res) => {
   if (!jiraAuth) return res.status(400).json({ error: 'Jira not configured' });
   const { headers, base } = jiraAuth;
   try {
-    const r = await fetch(`${base}/rest/api/3/project/search?maxResults=100&orderBy=NAME`, { headers });
+    const r = await fetch(`${base}/rest/api/2/project?maxResults=100`, { headers });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     const data = await r.json();
-    res.json((data.values || []).map((p) => ({ key: p.key, name: p.name })));
+    // Cloud returns { values: [...] }, Server returns [...] directly
+    const list = Array.isArray(data) ? data : (data.values || []);
+    res.json(list.map((p) => ({ key: p.key, name: p.name })));
   } catch (e) {
     console.error('[jira] projects error:', e.message);
     res.status(500).json({ error: e.message });
