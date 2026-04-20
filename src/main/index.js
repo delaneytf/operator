@@ -1,8 +1,14 @@
 // Electron main process — starts Express server, creates BrowserWindow
 
-const { app, BrowserWindow, Menu, dialog, shell, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, nativeTheme, Notification } = require('electron');
 const path = require('path');
-const { fork } = require('child_process');
+const os = require('os');
+const https = require('https');
+const fs = require('fs');
+const { fork, spawn } = require('child_process');
+const { promisify } = require('util');
+const execFile = require('child_process').execFile;
+const execFileAsync = promisify(execFile);
 
 const PORT = process.env.PORT || 3000;
 const SERVER_URL = `http://localhost:${PORT}`;
@@ -163,6 +169,91 @@ app.on('before-quit', () => {
   }
 });
 
+// ── Update helpers ────────────────────────────────────────────────────────────
+
+function getAppBundlePath() {
+  const m = process.execPath.match(/^(.+\.app)\//);
+  return m ? m[1] : null;
+}
+
+function canAutoInstall() {
+  if (process.platform !== 'darwin') return false;
+  const bundle = getAppBundlePath();
+  return !!(bundle && bundle.startsWith(os.homedir()));
+}
+
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const request = (u) => {
+      https.get(u, { headers: { 'User-Agent': 'Operator-App' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return request(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          file.close(() => fs.unlink(destPath, () => {}));
+          return reject(new Error(`HTTP ${res.statusCode}`));
+        }
+        res.pipe(file);
+        file.on('finish', () => file.close(resolve));
+        file.on('error', (err) => { fs.unlink(destPath, () => {}); reject(err); });
+      }).on('error', reject);
+    };
+    request(url);
+  });
+}
+
+async function installUpdate(downloadUrl) {
+  const dmgPath = path.join(os.tmpdir(), 'OperatorUpdate.dmg');
+  try {
+    if (Notification.isSupported()) {
+      new Notification({ title: 'Operator Update', body: 'Downloading update in background…' }).show();
+    }
+
+    await downloadFile(downloadUrl, dmgPath);
+
+    // Mount DMG and parse plist output for mount point
+    const { stdout: plist } = await execFileAsync('hdiutil', ['attach', dmgPath, '-nobrowse', '-plist']);
+    const mountMatch = plist.match(/<key>mount-point<\/key>\s*<string>([^<]+)<\/string>/);
+    if (!mountMatch) throw new Error('Could not determine DMG mount point');
+    const mountPoint = mountMatch[1].trim();
+
+    // Find .app bundle inside the DMG
+    const entries = fs.readdirSync(mountPoint);
+    const appName = entries.find((f) => f.endsWith('.app'));
+    if (!appName) throw new Error('No .app bundle found in DMG');
+
+    // Install into ~/Applications (creating it if needed)
+    const appsDir = path.join(os.homedir(), 'Applications');
+    if (!fs.existsSync(appsDir)) fs.mkdirSync(appsDir, { recursive: true });
+
+    const destApp = path.join(appsDir, appName);
+    if (fs.existsSync(destApp)) await execFileAsync('rm', ['-rf', destApp]);
+    await execFileAsync('cp', ['-R', path.join(mountPoint, appName), appsDir + '/']);
+
+    await execFileAsync('hdiutil', ['detach', mountPoint, '-quiet']).catch(() => {});
+    fs.unlink(dmgPath, () => {});
+
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Installed',
+      message: 'Operator has been updated.',
+      detail: 'Restart now to use the new version.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+
+    if (response === 0) {
+      spawn('open', [destApp], { detached: true, stdio: 'ignore' }).unref();
+      app.quit();
+    }
+  } catch (err) {
+    fs.unlink(dmgPath, () => {});
+    dialog.showErrorBox('Update Failed', err.message);
+  }
+}
+
 // ── Update checker ────────────────────────────────────────────────────────────
 
 async function checkForUpdates(silent = false) {
@@ -177,26 +268,38 @@ async function checkForUpdates(silent = false) {
     const current = app.getVersion();
 
     if (latest && latest !== current) {
-      // Pick the right asset for this platform/arch
       const isArm = process.arch === 'arm64';
-      const assetName = isArm ? 'arm64.dmg' : '.dmg';
       const asset = (release.assets || []).find((a) =>
         process.platform === 'darwin'
-          ? a.name.endsWith(isArm ? '-arm64.dmg' : '.dmg') && !a.name.includes('arm64') === !isArm
+          ? isArm ? a.name.includes('arm64') && a.name.endsWith('.dmg')
+                  : a.name.endsWith('.dmg') && !a.name.includes('arm64')
           : a.name.endsWith('.exe') || a.name.endsWith('.AppImage')
       );
       const downloadUrl = asset?.browser_download_url || release.html_url;
+      const autoInstall = canAutoInstall() && asset?.browser_download_url;
+
+      const buttons = autoInstall
+        ? ['Download & Install', 'Download Manually', 'Later']
+        : ['Download', 'Later'];
 
       const { response } = await dialog.showMessageBox(mainWindow, {
         type: 'info',
         title: 'Update Available',
         message: `Operator ${release.tag_name} is available`,
-        detail: `You're on v${current}. Download the latest version now?`,
-        buttons: ['Download', 'Later'],
+        detail: autoInstall
+          ? `You're on v${current}. Click "Download & Install" — Operator will restart automatically when ready.`
+          : `You're on v${current}. Download the latest version to update.`,
+        buttons,
         defaultId: 0,
-        cancelId: 1,
+        cancelId: buttons.length - 1,
       });
-      if (response === 0) shell.openExternal(downloadUrl);
+
+      if (autoInstall) {
+        if (response === 0) installUpdate(downloadUrl);
+        else if (response === 1) shell.openExternal(downloadUrl);
+      } else {
+        if (response === 0) shell.openExternal(downloadUrl);
+      }
     } else if (!silent) {
       dialog.showMessageBox(mainWindow, {
         type: 'info',
