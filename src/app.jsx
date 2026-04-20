@@ -26,6 +26,14 @@ function App() {
     return () => window.removeEventListener('message', onMsg);
   }, []);
 
+  // Auto-navigate to Integrations after OAuth callback
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('connected') || params.get('auth_error')) {
+      actions.setMeta({ activeView: 'integrations' });
+    }
+  }, []);
+
   // Helper for sub-components to call navigation actions via window.actions
   React.useEffect(() => {
     window.actions.setActiveView = (view, opts = {}) => {

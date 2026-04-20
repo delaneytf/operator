@@ -2,9 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const REDIRECT_BASE = process.env.OAUTH_REDIRECT_BASE || `http://localhost:${PORT}`;
+const oauthStates = {}; // nonce → { provider, codeVerifier? }
 // In packaged Electron app, OPERATOR_DATA_DIR points to writable userData.
 // In dev, falls back to ./data/ in the project root.
 const DATA_DIR    = process.env.OPERATOR_DATA_DIR || path.join(__dirname, 'data');
@@ -85,10 +88,10 @@ app.get('/api/auth/status', (req, res) => {
   const providers = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai', 'gemini'];
   providers.forEach((p) => {
     const t = tokens[p];
-    status[p] = { connected: !!t, savedAt: t?.savedAt || null };
-    if (t?.email) status[p].email = t.email;
-    if (t?.site)  status[p].site  = t.site;
-    if (t?.user)  status[p].user  = t.user;
+    status[p] = { connected: !!t, savedAt: t?.savedAt || null, authType: t?.authType || 'apikey' };
+    if (t?.email)    status[p].email = t.email;
+    if (t?.site || t?.siteName) status[p].site = t.siteName || t.site;
+    if (t?.user)     status[p].user  = t.user;
   });
 
   // Also check env fallbacks for Jira / Confluence / Claude
@@ -103,7 +106,7 @@ app.get('/api/auth/status', (req, res) => {
 app.post('/api/auth/credentials', (req, res) => {
   const { provider, credentials } = req.body;
   if (!provider || !credentials) return res.status(400).json({ error: 'provider and credentials required' });
-  const allowed = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai'];
+  const allowed = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai', 'gemini'];
   if (!allowed.includes(provider)) return res.status(400).json({ error: 'unknown provider' });
   setToken(provider, credentials);
   res.json({ ok: true });
@@ -114,21 +117,198 @@ app.delete('/api/auth/:provider', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── OAuth 2.0 connect + callback ──────────────────────────────────────────────
+
+app.get('/auth/connect/:provider', (req, res) => {
+  const { provider } = req.params;
+  const state = crypto.randomBytes(16).toString('hex');
+  const redirectUri = `${REDIRECT_BASE}/auth/callback/${provider}`;
+
+  if (provider === 'atlassian') {
+    if (!process.env.ATLASSIAN_CLIENT_ID)
+      return res.status(400).send('ATLASSIAN_CLIENT_ID not set in .env — register an OAuth app at developer.atlassian.com');
+    oauthStates[state] = { provider };
+    return res.redirect(`https://auth.atlassian.com/authorize?` + new URLSearchParams({
+      audience: 'api.atlassian.com',
+      client_id: process.env.ATLASSIAN_CLIENT_ID,
+      scope: 'read:jira-work write:jira-work manage:jira-project read:confluence-space.summary read:confluence-content.all write:confluence-content offline_access',
+      redirect_uri: redirectUri,
+      state,
+      response_type: 'code',
+      prompt: 'consent',
+    }));
+  }
+
+  if (provider === 'slack') {
+    if (!process.env.SLACK_CLIENT_ID)
+      return res.status(400).send('SLACK_CLIENT_ID not set in .env — register an OAuth app at api.slack.com/apps');
+    oauthStates[state] = { provider };
+    return res.redirect(`https://slack.com/oauth/v2/authorize?` + new URLSearchParams({
+      client_id: process.env.SLACK_CLIENT_ID,
+      scope: 'channels:read,channels:history,chat:write,users:read',
+      redirect_uri: redirectUri,
+      state,
+    }));
+  }
+
+  if (provider === 'microsoft') {
+    if (!process.env.MICROSOFT_CLIENT_ID)
+      return res.status(400).send('MICROSOFT_CLIENT_ID not set in .env — register an app at portal.azure.com');
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    oauthStates[state] = { provider, codeVerifier };
+    return res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?` + new URLSearchParams({
+      client_id: process.env.MICROSOFT_CLIENT_ID,
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      scope: 'User.Read Calendars.Read Mail.Read offline_access',
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+    }));
+  }
+
+  res.status(400).send('Unknown OAuth provider');
+});
+
+app.get('/auth/callback/:provider', async (req, res) => {
+  const { provider } = req.params;
+  const { code, state, error } = req.query;
+
+  if (error) return res.redirect(`/?auth_error=${encodeURIComponent(error)}`);
+
+  const stateData = oauthStates[state];
+  if (!stateData) return res.redirect('/?auth_error=invalid_state');
+  delete oauthStates[state];
+
+  const redirectUri = `${REDIRECT_BASE}/auth/callback/${provider}`;
+
+  try {
+    if (provider === 'atlassian') {
+      const tokenRes = await fetch('https://auth.atlassian.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          client_id: process.env.ATLASSIAN_CLIENT_ID,
+          client_secret: process.env.ATLASSIAN_CLIENT_SECRET,
+          code,
+          redirect_uri: redirectUri,
+        }),
+      });
+      const tokens = await tokenRes.json();
+      if (!tokenRes.ok) throw new Error(tokens.error_description || tokens.error || 'Token exchange failed');
+
+      const sitesRes = await fetch('https://api.atlassian.com/oauth/token/accessible-resources', {
+        headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: 'application/json' },
+      });
+      const sites = await sitesRes.json();
+      const primary = sites[0];
+
+      const record = {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        cloudId: primary?.id,
+        site: primary?.url,
+        siteName: primary?.name,
+        allSites: sites.map((s) => ({ id: s.id, url: s.url, name: s.name })),
+        authType: 'oauth',
+      };
+      setToken('jira', record);
+      setToken('confluence', record);
+      return res.redirect('/?connected=atlassian');
+    }
+
+    if (provider === 'slack') {
+      const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.SLACK_CLIENT_ID,
+          client_secret: process.env.SLACK_CLIENT_SECRET,
+          code,
+          redirect_uri: redirectUri,
+        }),
+      });
+      const data = await tokenRes.json();
+      if (!data.ok) throw new Error(data.error || 'Slack token exchange failed');
+      setToken('slack', {
+        accessToken: data.access_token,
+        teamId: data.team?.id,
+        siteName: data.team?.name,
+        authType: 'oauth',
+      });
+      return res.redirect('/?connected=slack');
+    }
+
+    if (provider === 'microsoft') {
+      const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.MICROSOFT_CLIENT_ID,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: stateData.codeVerifier,
+        }),
+      });
+      const tokens = await tokenRes.json();
+      if (tokens.error) throw new Error(tokens.error_description || tokens.error || 'Token exchange failed');
+
+      const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      const profile = await profileRes.json();
+
+      const record = {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        user: profile.displayName,
+        email: profile.mail || profile.userPrincipalName,
+        authType: 'oauth',
+      };
+      setToken('microsoft', record);
+      setToken('teams', record);
+      setToken('outlook', record);
+      return res.redirect('/?connected=microsoft');
+    }
+
+    res.redirect('/?auth_error=unknown_provider');
+  } catch (e) {
+    console.error(`[oauth] ${provider} callback error:`, e.message);
+    res.redirect(`/?auth_error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+// ── Atlassian auth helper (OAuth or API key) ──────────────────────────────────
+
+function getAtlassianAuth(provider) {
+  const t = getToken(provider);
+  if (t?.authType === 'oauth' && t?.accessToken && t?.cloudId) {
+    const base = provider === 'jira'
+      ? `https://api.atlassian.com/ex/jira/${t.cloudId}`
+      : `https://api.atlassian.com/ex/confluence/${t.cloudId}`;
+    return { headers: { Authorization: `Bearer ${t.accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }, base };
+  }
+  const email    = t?.email || process.env[provider === 'jira' ? 'JIRA_EMAIL' : 'CONFLUENCE_EMAIL'];
+  const apiToken = t?.token || process.env[provider === 'jira' ? 'JIRA_API_TOKEN' : 'CONFLUENCE_API_TOKEN'];
+  const baseUrl  = t?.site  || process.env[provider === 'jira' ? 'JIRA_BASE_URL' : 'CONFLUENCE_BASE_URL'];
+  if (!email || !apiToken || !baseUrl) return null;
+  return {
+    headers: { Authorization: `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+    base: baseUrl.replace(/\/$/, ''),
+  };
+}
+
 // ── Jira sync ─────────────────────────────────────────────────────────────────
 
 app.post('/api/jira/sync', async (req, res) => {
-  const t = getToken('jira');
-  const email    = t?.email    || process.env.JIRA_EMAIL;
-  const token    = t?.token    || process.env.JIRA_API_TOKEN;
-  const baseUrl  = t?.site     || process.env.JIRA_BASE_URL;
-
-  if (!baseUrl || !email || !token) {
-    return res.status(400).json({ error: 'Jira credentials not configured. Set them in Integrations or add JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN to .env' });
+  const jiraAuth = getAtlassianAuth('jira');
+  if (!jiraAuth) {
+    return res.status(400).json({ error: 'Jira not connected. Sign in via Integrations or add JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN to .env' });
   }
-
-  const auth = Buffer.from(`${email}:${token}`).toString('base64');
-  const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json' };
-  const base = baseUrl.replace(/\/$/, '');
+  const { headers, base } = jiraAuth;
 
   try {
     // Fetch projects
@@ -213,18 +393,11 @@ app.post('/api/jira/sync', async (req, res) => {
 // ── Confluence sync ───────────────────────────────────────────────────────────
 
 app.post('/api/confluence/sync', async (req, res) => {
-  const t = getToken('confluence');
-  const email   = t?.email   || process.env.CONFLUENCE_EMAIL;
-  const token   = t?.token   || process.env.CONFLUENCE_API_TOKEN;
-  const baseUrl = t?.site    || process.env.CONFLUENCE_BASE_URL;
-
-  if (!baseUrl || !email || !token) {
-    return res.status(400).json({ error: 'Confluence credentials not configured. Set them in Integrations or add CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN to .env' });
+  const confAuth = getAtlassianAuth('confluence');
+  if (!confAuth) {
+    return res.status(400).json({ error: 'Confluence not connected. Sign in via Integrations or add CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN to .env' });
   }
-
-  const auth = Buffer.from(`${email}:${token}`).toString('base64');
-  const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json' };
-  const base = baseUrl.replace(/\/$/, '');
+  const { headers, base } = confAuth;
 
   try {
     // Fetch spaces
@@ -277,7 +450,7 @@ app.post('/api/confluence/sync', async (req, res) => {
 
 app.post('/api/slack/sync', async (req, res) => {
   const t = getToken('slack');
-  const botToken = t?.token || process.env.SLACK_BOT_TOKEN;
+  const botToken = t?.accessToken || t?.token || process.env.SLACK_BOT_TOKEN;
   if (!botToken) return res.status(400).json({ error: 'Slack bot token not configured. Set it in Integrations.' });
 
   const headers = { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' };
@@ -322,7 +495,7 @@ app.post('/api/slack/sync', async (req, res) => {
 // ── Microsoft Graph sync ──────────────────────────────────────────────────────
 
 app.post('/api/microsoft/sync', async (req, res) => {
-  const t = getToken('teams') || getToken('outlook');
+  const t = getToken('microsoft') || getToken('teams') || getToken('outlook');
   const accessToken = t?.accessToken || process.env.MICROSOFT_ACCESS_TOKEN;
   if (!accessToken) return res.status(400).json({ error: 'Microsoft access token not configured. Connect via Integrations.' });
 
@@ -377,18 +550,11 @@ app.post('/api/microsoft/sync', async (req, res) => {
 // ── Jira project list (for scope picker) ─────────────────────────────────────
 
 app.get('/api/jira/projects', async (req, res) => {
-  const t = getToken('jira');
-  const email   = t?.email   || process.env.JIRA_EMAIL;
-  const token   = t?.token   || process.env.JIRA_API_TOKEN;
-  const baseUrl = t?.site    || process.env.JIRA_BASE_URL;
-  if (!baseUrl || !email || !token) return res.status(400).json({ error: 'Jira not configured' });
-
-  const auth = Buffer.from(`${email}:${token}`).toString('base64');
-  const base = baseUrl.replace(/\/$/, '');
+  const jiraAuth = getAtlassianAuth('jira');
+  if (!jiraAuth) return res.status(400).json({ error: 'Jira not configured' });
+  const { headers, base } = jiraAuth;
   try {
-    const r = await fetch(`${base}/rest/api/3/project/search?maxResults=100&orderBy=NAME`, {
-      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    });
+    const r = await fetch(`${base}/rest/api/3/project/search?maxResults=100&orderBy=NAME`, { headers });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     const data = await r.json();
     res.json((data.values || []).map((p) => ({ key: p.key, name: p.name })));
@@ -401,18 +567,11 @@ app.get('/api/jira/projects', async (req, res) => {
 // ── Confluence space list (for scope picker) ──────────────────────────────────
 
 app.get('/api/confluence/spaces', async (req, res) => {
-  const t = getToken('confluence');
-  const email   = t?.email   || process.env.CONFLUENCE_EMAIL;
-  const token   = t?.token   || process.env.CONFLUENCE_API_TOKEN;
-  const baseUrl = t?.site    || process.env.CONFLUENCE_BASE_URL;
-  if (!baseUrl || !email || !token) return res.status(400).json({ error: 'Confluence not configured' });
-
-  const auth = Buffer.from(`${email}:${token}`).toString('base64');
-  const base = baseUrl.replace(/\/$/, '');
+  const confAuth = getAtlassianAuth('confluence');
+  if (!confAuth) return res.status(400).json({ error: 'Confluence not configured' });
+  const { headers, base } = confAuth;
   try {
-    const r = await fetch(`${base}/wiki/rest/api/space?limit=100&type=global`, {
-      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    });
+    const r = await fetch(`${base}/wiki/rest/api/space?limit=100&type=global`, { headers });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     const data = await r.json();
     res.json((data.results || []).map((s) => ({ key: s.key, name: s.name })));
