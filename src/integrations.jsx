@@ -6,10 +6,27 @@ function IntegrationsView({ state }) {
   const getIntg = (key) => ({ connected: false, access: 'read', ...( integrations[key] || {}) });
 
   const [connecting, setConnecting] = React.useState(null);
-  const [apiKeyInput, setApiKeyInput] = React.useState({});      // { [key]: string }
-  const [atlassianInput, setAtlassianInput] = React.useState({}); // { [key]: {site,email,token} }
+  const [apiKeyInput, setApiKeyInput] = React.useState({});
+  const [atlassianInput, setAtlassianInput] = React.useState({});
   const [expandedKey, setExpandedKey] = React.useState(null);
   const [serverStatus, setServerStatus] = React.useState({});
+  const [dynamicScopes, setDynamicScopes] = React.useState({});   // { jira: [{key,name}], confluence: [{key,name}] }
+  const [loadingScopes, setLoadingScopes] = React.useState({});
+
+  // Fetch real Jira projects / Confluence spaces when the settings panel opens
+  React.useEffect(() => {
+    if (!expandedKey || (expandedKey !== 'jira' && expandedKey !== 'confluence')) return;
+    if (dynamicScopes[expandedKey]) return; // already loaded
+    const cfg = getIntg(expandedKey);
+    if (!cfg.connected) return;
+    const endpoint = expandedKey === 'jira' ? '/api/jira/projects' : '/api/confluence/spaces';
+    setLoadingScopes(prev => ({ ...prev, [expandedKey]: true }));
+    fetch(endpoint)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setDynamicScopes(prev => ({ ...prev, [expandedKey]: data })))
+      .catch(() => setDynamicScopes(prev => ({ ...prev, [expandedKey]: [] })))
+      .finally(() => setLoadingScopes(prev => ({ ...prev, [expandedKey]: false })));
+  }, [expandedKey]);
 
   // Load server auth status on mount
   React.useEffect(() => {
@@ -188,7 +205,7 @@ function IntegrationsView({ state }) {
         {
           key: 'openai',
           name: 'ChatGPT / OpenAI',
-          logo: 'G',
+          logo: 'O',
           bg: '#10A37F',
           authType: 'apikey',
           description: 'Use OpenAI models as an alternative AI assistant.',
@@ -198,6 +215,20 @@ function IntegrationsView({ state }) {
           ],
           note: 'API key is saved to the server — never sent to any third party.',
           keyPlaceholder: 'sk-…',
+        },
+        {
+          key: 'gemini',
+          name: 'Gemini',
+          logo: '✦',
+          bg: '#4285F4',
+          authType: 'apikey',
+          description: 'Use Google Gemini models as an AI assistant.',
+          capabilities: [
+            'All assistant features via Gemini models',
+            'Alternative or complement to Claude and OpenAI',
+          ],
+          note: 'API key is saved to the server — never sent to any third party.',
+          keyPlaceholder: 'AIzaSy…',
         },
       ],
     },
@@ -534,33 +565,50 @@ function IntegrationsView({ state }) {
                         </div>
                       </div>
 
-                      {/* Scope picker */}
-                      {intg.scopeOptions && intg.scopeOptions.length > 0 && (
+                      {/* Scope picker — uses real API data for Jira/Confluence */}
+                      {(intg.authType === 'atlassian' || (intg.scopeOptions && intg.scopeOptions.length > 0)) && (
                         <div>
-                          <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 8 }}>
-                            {intg.scopeLabel || 'Scope'} — select what to sync
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)' }}>
+                              {intg.scopeLabel || 'Scope'} — select what to sync
+                            </div>
+                            {loadingScopes[intg.key] && (
+                              <span className="mono" style={{ fontSize: 9, color: 'var(--fg-4)' }}>loading…</span>
+                            )}
+                            {dynamicScopes[intg.key] && (
+                              <button className="btn btn-sm" style={{ fontSize: 9.5, padding: '1px 7px', marginLeft: 'auto' }}
+                                onClick={() => setDynamicScopes(prev => { const n = {...prev}; delete n[intg.key]; return n; })}>
+                                Refresh
+                              </button>
+                            )}
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {intg.scopeOptions.map((opt) => {
-                              const selected = selectedScopes.includes(opt);
-                              return (
-                                <button key={opt}
-                                  onClick={() => toggleScope(intg.key, opt, selectedScopes)}
-                                  style={{
-                                    padding: '4px 11px',
-                                    borderRadius: 20,
-                                    fontSize: 11.5,
-                                    fontFamily: 'inherit',
-                                    cursor: 'pointer',
-                                    border: selected ? 'none' : '1px solid var(--line-2)',
-                                    background: selected ? 'var(--accent)' : 'transparent',
-                                    color: selected ? '#fff' : 'var(--fg-3)',
-                                    transition: 'all 0.1s',
-                                  }}>
-                                  {opt}
-                                </button>
-                              );
-                            })}
+                            {(() => {
+                              const live = dynamicScopes[intg.key];
+                              const opts = live
+                                ? live.map(o => ({ value: o.key, label: `${o.key} — ${o.name}` }))
+                                : (intg.scopeOptions || []).map(o => ({ value: o, label: o }));
+                              if (!loadingScopes[intg.key] && opts.length === 0) {
+                                return <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>No {(intg.scopeLabel || 'items').toLowerCase()} found.</span>;
+                              }
+                              return opts.map(({ value, label }) => {
+                                const selected = selectedScopes.includes(value);
+                                return (
+                                  <button key={value}
+                                    onClick={() => toggleScope(intg.key, value, selectedScopes)}
+                                    style={{
+                                      padding: '4px 11px', borderRadius: 20, fontSize: 11.5,
+                                      fontFamily: 'inherit', cursor: 'pointer',
+                                      border: selected ? 'none' : '1px solid var(--line-2)',
+                                      background: selected ? 'var(--accent)' : 'transparent',
+                                      color: selected ? '#fff' : 'var(--fg-3)',
+                                      transition: 'all 0.1s',
+                                    }}>
+                                    {label}
+                                  </button>
+                                );
+                              });
+                            })()}
                           </div>
                           <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 6 }}>
                             Only selected {(intg.scopeLabel || 'items').toLowerCase()} will be synced and surfaced in Operator.

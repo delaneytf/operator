@@ -82,7 +82,7 @@ app.get('/api/auth/status', (req, res) => {
   const env = process.env;
   const status = {};
 
-  const providers = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai'];
+  const providers = ['jira', 'confluence', 'slack', 'teams', 'outlook', 'metabase', 'claude', 'openai', 'gemini'];
   providers.forEach((p) => {
     const t = tokens[p];
     status[p] = { connected: !!t, savedAt: t?.savedAt || null };
@@ -95,6 +95,7 @@ app.get('/api/auth/status', (req, res) => {
   if (!status.jira.connected && env.JIRA_API_TOKEN)        status.jira        = { connected: true, source: 'env' };
   if (!status.confluence.connected && env.CONFLUENCE_API_TOKEN) status.confluence = { connected: true, source: 'env' };
   if (!status.claude.connected && env.ANTHROPIC_API_KEY)   status.claude      = { connected: true, source: 'env' };
+  if (!status.gemini.connected && env.GEMINI_API_KEY)      status.gemini      = { connected: true, source: 'env' };
 
   res.json(status);
 });
@@ -373,19 +374,68 @@ app.post('/api/microsoft/sync', async (req, res) => {
 
 // ── AI chat ───────────────────────────────────────────────────────────────────
 
+// ── Jira project list (for scope picker) ─────────────────────────────────────
+
+app.get('/api/jira/projects', async (req, res) => {
+  const t = getToken('jira');
+  const email   = t?.email   || process.env.JIRA_EMAIL;
+  const token   = t?.token   || process.env.JIRA_API_TOKEN;
+  const baseUrl = t?.site    || process.env.JIRA_BASE_URL;
+  if (!baseUrl || !email || !token) return res.status(400).json({ error: 'Jira not configured' });
+
+  const auth = Buffer.from(`${email}:${token}`).toString('base64');
+  const base = baseUrl.replace(/\/$/, '');
+  try {
+    const r = await fetch(`${base}/rest/api/3/project/search?maxResults=100&orderBy=NAME`, {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+    });
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    const data = await r.json();
+    res.json((data.values || []).map((p) => ({ key: p.key, name: p.name })));
+  } catch (e) {
+    console.error('[jira] projects error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Confluence space list (for scope picker) ──────────────────────────────────
+
+app.get('/api/confluence/spaces', async (req, res) => {
+  const t = getToken('confluence');
+  const email   = t?.email   || process.env.CONFLUENCE_EMAIL;
+  const token   = t?.token   || process.env.CONFLUENCE_API_TOKEN;
+  const baseUrl = t?.site    || process.env.CONFLUENCE_BASE_URL;
+  if (!baseUrl || !email || !token) return res.status(400).json({ error: 'Confluence not configured' });
+
+  const auth = Buffer.from(`${email}:${token}`).toString('base64');
+  const base = baseUrl.replace(/\/$/, '');
+  try {
+    const r = await fetch(`${base}/wiki/rest/api/space?limit=100&type=global`, {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+    });
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    const data = await r.json();
+    res.json((data.results || []).map((s) => ({ key: s.key, name: s.name })));
+  } catch (e) {
+    console.error('[confluence] spaces error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── AI chat ───────────────────────────────────────────────────────────────────
+
 app.post('/api/ai/chat', async (req, res) => {
   const { system, messages, provider: reqProvider } = req.body;
 
-  // Determine which AI provider to use
   const claudeToken = getToken('claude');
   const openaiToken = getToken('openai');
+  const geminiToken = getToken('gemini');
   const anthropicKey = claudeToken?.apiKey || process.env.ANTHROPIC_API_KEY;
   const openaiKey    = openaiToken?.apiKey || process.env.OPENAI_API_KEY;
+  const geminiKey    = geminiToken?.apiKey || process.env.GEMINI_API_KEY;
 
-  // Use requested provider, fall back to what's available
-  const provider = reqProvider || (anthropicKey ? 'claude' : openaiKey ? 'openai' : null);
-
-  if (!provider) return res.status(400).json({ error: 'No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env, or connect in Integrations.' });
+  const provider = reqProvider || (anthropicKey ? 'claude' : openaiKey ? 'openai' : geminiKey ? 'gemini' : null);
+  if (!provider) return res.status(400).json({ error: 'No AI provider configured. Connect Claude, OpenAI, or Gemini in Integrations.' });
 
   try {
     if (provider === 'openai') {
@@ -405,15 +455,34 @@ app.post('/api/ai/chat', async (req, res) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || `OpenAI error ${response.status}`);
       res.json({ text: data.choices[0].message.content, provider: 'openai' });
+
+    } else if (provider === 'gemini') {
+      if (!geminiKey) return res.status(400).json({ error: 'Gemini API key not configured.' });
+      const model = geminiToken?.model || process.env.GEMINI_MODEL || 'gemini-1.5-pro';
+      // Gemini uses a different message format; inject system prompt as leading turn
+      const contents = [];
+      if (system) {
+        contents.push({ role: 'user', parts: [{ text: system }] });
+        contents.push({ role: 'model', parts: [{ text: 'Understood.' }] });
+      }
+      messages.forEach((m) => contents.push({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      }));
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || `Gemini error ${response.status}`);
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      res.json({ text, provider: 'gemini' });
+
     } else {
       if (!anthropicKey) return res.status(400).json({ error: 'Anthropic API key not configured.' });
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: {
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
+        headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify({
           model: claudeToken?.model || process.env.ANTHROPIC_MODEL || 'claude-opus-4-7',
           max_tokens: 1024,
