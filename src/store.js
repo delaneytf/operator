@@ -14,18 +14,36 @@ function migratePriorities(state) {
   };
 }
 
+function buildEmptyState() {
+  const s = structuredClone(window.SEED);
+  Object.keys(s).forEach((k) => { if (Array.isArray(s[k])) s[k] = []; });
+  s.meta = {
+    ...s.meta,
+    activeView: 'today',
+    activeProjectId: null,
+    integrations: {},
+    plannedToday: [],
+    yesterdayShipped: [],
+    dailyPlans: {},
+  };
+  return s;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(window.SEED);
+    if (!raw) {
+      // In packaged Electron app, start blank instead of showing demo data
+      return window.__ELECTRON__ ? buildEmptyState() : structuredClone(window.SEED);
+    }
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.version !== window.SEED.version) {
-      return structuredClone(window.SEED);
+      return window.__ELECTRON__ ? buildEmptyState() : structuredClone(window.SEED);
     }
     return migratePriorities(parsed);
   } catch (e) {
     console.warn('[store] failed to load, seeding', e);
-    return structuredClone(window.SEED);
+    return window.__ELECTRON__ ? buildEmptyState() : structuredClone(window.SEED);
   }
 }
 

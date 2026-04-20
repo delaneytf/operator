@@ -1176,9 +1176,14 @@ function RisksTab({ project, risks, state }) {
               <div style={{ position: 'absolute', inset: 0, background: riskGradient, opacity: 0.2 }} />
               <div style={{ position: 'absolute', inset: 0, background: riskGradient, clipPath: `inset(0 ${100 - fillPct}% 0 0 round 3px)` }} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-              {['0 low', '10 med', '16 high', '25 crit'].map((t) => (
-                <span key={t} style={{ ...monoSm, fontSize: 9, textTransform: 'none', letterSpacing: 0 }}>{t}</span>
+            <div style={{ position: 'relative', height: 14, marginBottom: 12 }}>
+              {[{label: '0 low', value: 0}, {label: '10 med', value: 10}, {label: '16 high', value: 16}, {label: '25 crit', value: 25}].map(({label, value}) => (
+                <span key={label} style={{
+                  position: 'absolute',
+                  left: `${(value / 25) * 100}%`,
+                  transform: value === 0 ? 'none' : value === 25 ? 'translateX(-100%)' : 'translateX(-50%)',
+                  ...monoSm, fontSize: 9, textTransform: 'none', letterSpacing: 0,
+                }}>{label}</span>
               ))}
             </div>
             {peakRisk && (

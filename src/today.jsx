@@ -757,16 +757,6 @@ Rules:
       setWatchlist(parsed.watchlist || []);
       setInsights(parsed.insights || []);
       setPicked(validPlan.map(p => p.taskId));
-      actions.saveDailyPlan(todayStr, {
-        date: todayStr,
-        generatedAt: new Date().toISOString(),
-        plan: validPlan,
-        deferred: validDeferred,
-        watchlist: parsed.watchlist || [],
-        insights: parsed.insights || [],
-        committed: [],
-        aiReplies: [],
-      });
     } catch (e) {
       setError('AI unavailable — showing smart defaults. ' + (e.message || ''));
       const ctx = buildCtx();
@@ -777,16 +767,6 @@ Rules:
       }));
       setPlan(fallback);
       setPicked(fallback.map(p => p.taskId));
-      actions.saveDailyPlan(todayStr, {
-        date: todayStr,
-        generatedAt: new Date().toISOString(),
-        plan: fallback,
-        deferred: [],
-        watchlist: [],
-        insights: [],
-        committed: [],
-        aiReplies: [],
-      });
     }
     setPhase('plan');
   };
@@ -838,12 +818,6 @@ Only suggest actions that directly follow from the feedback. Empty array if none
         setPlan(validPlan);
         setPicked(validPlan.map(p => p.taskId));
         if (parsed.deferred) setDeferred(validDeferred);
-        actions.updateDailyPlan(todayStr, {
-          plan: validPlan,
-          deferred: validDeferred,
-          watchlist: parsed.watchlist || watchlist,
-          aiReplies: [...(curPlan.aiReplies || []), parsed.feedbackResponse].filter(Boolean),
-        });
       }
       if (parsed.watchlist) setWatchlist(parsed.watchlist);
       if (parsed.suggestedActions) {
@@ -881,7 +855,6 @@ Only suggest actions that directly follow from the feedback. Empty array if none
 
   const commitPlan = () => {
     actions.setPlannedToday(picked);
-    actions.updateDailyPlan(todayStr, { committed: picked });
   };
 
   const [sectionCollapsed, setSectionCollapsed] = React.useState(false);
@@ -1407,7 +1380,7 @@ function EndDayModal({ state, onClose }) {
           </div>
         )}
         <div className="field">
-          <span className="field-label">Day note <span style={{ color: 'var(--fg-4)', fontWeight: 400 }}>(optional — shows in calendar)</span></span>
+          <span className="field-label">Day summary <span style={{ color: 'var(--fg-4)', fontWeight: 400 }}>(optional)</span></span>
           <textarea
             className="textarea"
             style={{ minHeight: 110 }}
