@@ -1335,7 +1335,7 @@ Only suggest actions that directly follow from the feedback. Empty array if none
           )}
 
           {/* Feedback / refine */}
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+          <div style={{ marginTop: 16, paddingTop: 14, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, borderTop: '1px solid var(--line)' }}>
             <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 6 }}>
               Refine with AI
             </div>
