@@ -802,12 +802,24 @@ textarea.inline-edit-input {
   overflow: hidden;
   cursor: default;
   display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
 }
 .rm-cell-count {
   font-weight: 700;
+  font-size: 12px;
   color: var(--fg);
+}
+.risk-matrix-compact,
+.risk-matrix-compact > div {
+  width: 100%;
+  height: 100%;
+}
+.risk-matrix-compact .risk-matrix {
+  grid-template-columns: 18px repeat(5, 1fr);
+  grid-template-rows: repeat(5, 1fr) 18px;
+  width: 100%;
+  height: 100%;
 }
 .rm-low     { background: oklch(55% 0.02 150 / 0.15); }
 .rm-med     { background: oklch(78% 0.14 70 / 0.15); }
@@ -1166,6 +1178,7 @@ textarea.inline-edit-input {
 .workload-bar.over { background: var(--danger); }
 .workload-bar.med  { background: var(--warn); }
 .workload-bar.ok   { background: var(--accent); }
+.workload-bar.idle { background: var(--line); }
 .workload-bar.today { box-shadow: 0 0 0 1px var(--fg); }
 .workload-label {
   font-family: var(--font-mono);

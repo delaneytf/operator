@@ -281,6 +281,8 @@ function TaskExpandedDetail({ task, state, onEdit, onJumpTo }) {
     <div className="pq-detail" onClick={(e) => e.stopPropagation()}>
       <div className="pq-meta-row">
         <div className="pq-meta">
+          <span className="pq-meta-item mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{task.id.toUpperCase()}</span>
+          <span className="pq-meta-sep" />
           <span className="pq-meta-item">
             <StatusDot status={task.status} />
             <span>{statusLabel}</span>

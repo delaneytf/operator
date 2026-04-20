@@ -575,6 +575,7 @@ function buildDailyLog(state) {
   (state.notes || []).forEach((n) => { if (n.date >= cutoffStr) dateSet.add(n.date); });
   (state.milestones || []).forEach((m) => { if (m.date >= cutoffStr && m.date <= today) dateSet.add(m.date); });
   (state.dayNotes || []).forEach((n) => { if (n.date >= cutoffStr) dateSet.add(n.date); });
+  Object.keys(state.dailyPlans || {}).forEach((date) => { if (date >= cutoffStr) dateSet.add(date); });
 
   return [...dateSet].sort((a, b) => b.localeCompare(a)).map((date) => ({
     date,
@@ -584,6 +585,7 @@ function buildDailyLog(state) {
     notesAdded: (state.notes || []).filter((n) => n.date === date),
     milestonesOn: (state.milestones || []).filter((m) => m.date === date),
     dayNote: (state.dayNotes || []).find((n) => n.date === date) || null,
+    dailyPlan: (state.dailyPlans || {})[date] || null,
   }));
 }
 
@@ -626,6 +628,7 @@ function DailyLogPanel({ state, dayNotes, dayNoteMap, onEditNote }) {
             entry.notesAdded.length && `${entry.notesAdded.length} note${entry.notesAdded.length > 1 ? 's' : ''}`,
             entry.milestonesOn.length && `${entry.milestonesOn.length} milestone`,
             entry.dayNote && 'journal',
+            entry.dailyPlan && 'plan',
           ].filter(Boolean);
 
           return (
@@ -667,6 +670,66 @@ function DailyLogPanel({ state, dayNotes, dayNoteMap, onEditNote }) {
                       ))}
                     </div>
                   )}
+
+                  {/* Daily plan artifact */}
+                  {entry.dailyPlan && (() => {
+                    const dp = entry.dailyPlan;
+                    const genTime = dp.generatedAt ? new Date(dp.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : null;
+                    const committed = dp.committed || [];
+                    const planTasks = (dp.plan || []).map((p) => {
+                      const t = state.tasks.find((x) => x.id === p.taskId);
+                      return t ? { ...p, task: t } : null;
+                    }).filter(Boolean);
+                    const deferredItems = (dp.deferred || []).map((d) => {
+                      const t = state.tasks.find((x) => x.id === d.taskId);
+                      return t ? { ...d, task: t } : null;
+                    }).filter(Boolean);
+                    return (
+                      <div className="cal-log-section">
+                        <div className="cal-log-section-label" style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+                          <span>Daily plan</span>
+                          {genTime && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', fontWeight: 400 }}>generated {genTime}</span>}
+                        </div>
+                        {(dp.insights || []).map((ins, i) => (
+                          <div key={i} className="cal-log-item" style={{ alignItems: 'flex-start', gap: 6 }}>
+                            <Icon name="bolt" size={10} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+                            <span style={{ fontSize: 11.5, color: 'var(--fg-3)', lineHeight: 1.4, flex: 1 }}>{ins}</span>
+                          </div>
+                        ))}
+                        {planTasks.map((p) => {
+                          const isDone = committed.includes(p.taskId) && p.task.status === 'done';
+                          const isCommitted = committed.includes(p.taskId);
+                          return (
+                            <div key={p.taskId} className="cal-log-item">
+                              <Icon name={isDone ? 'check' : isCommitted ? 'target' : 'clock'} size={10} style={{ color: isDone ? 'var(--ok)' : isCommitted ? 'var(--accent)' : 'var(--fg-4)', flexShrink: 0 }} />
+                              <span className="truncate" style={{ textDecoration: isDone ? 'line-through' : 'none', color: isDone ? 'var(--fg-4)' : 'var(--fg-2)' }}>{p.task.title}</span>
+                              <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>{p.task.id.toUpperCase()}</span>
+                            </div>
+                          );
+                        })}
+                        {deferredItems.length > 0 && (
+                          <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--line)' }}>
+                            <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginBottom: 3 }}>Deferred</div>
+                            {deferredItems.map((d) => (
+                              <div key={d.taskId} className="cal-log-item" style={{ opacity: 0.7 }}>
+                                <Icon name="clock" size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                                <span className="truncate" style={{ color: 'var(--fg-3)' }}>{d.task.title}</span>
+                                {d.reason && <span style={{ fontSize: 10.5, color: 'var(--fg-4)', fontStyle: 'italic', flexShrink: 0 }}>{d.reason}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(dp.aiReplies || []).length > 0 && (
+                          <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--line)' }}>
+                            <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', marginBottom: 3 }}>Refinements</div>
+                            {dp.aiReplies.map((r, i) => (
+                              <div key={i} className="cal-log-note-body" style={{ marginBottom: 4 }}>{r}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Manual note */}
                   <div className="cal-log-section">
