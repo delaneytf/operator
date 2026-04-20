@@ -44,6 +44,7 @@ function App() {
   };
 
   const activeProject = state.projects.find((p) => p.id === state.meta.activeProjectId);
+  const integrations = state.meta.integrations || {};
 
   // Action-needed sidebar counts only
   const todayActionCount = todayTasks(state).filter((t) => t._due !== null && t._due <= 0).length;
@@ -117,6 +118,14 @@ function App() {
 
         <div className="sb-section" style={{ marginTop: 10 }}>
           <span>Integrations</span>
+          <button
+            className="icon-btn"
+            title="Manage integrations"
+            style={{ marginLeft: 'auto', padding: '0 2px', opacity: 0.6 }}
+            onClick={() => setView('integrations')}
+          >
+            <Icon name="settings" size={11} />
+          </button>
         </div>
         <button className={`sb-item ${state.meta.activeView === 'assistant' ? 'active' : ''}`} onClick={() => setView('assistant')}>
           <span className="sb-item-icon"><Icon name="target" /></span>
@@ -125,10 +134,12 @@ function App() {
         <button className={`sb-item ${state.meta.activeView === 'jira' ? 'active' : ''}`} onClick={() => setView('jira')}>
           <span className="sb-item-icon"><Icon name="grid" /></span>
           <span className="sb-item-label">Jira</span>
+          {integrations.jira?.connected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', marginLeft: 'auto', flexShrink: 0 }} />}
         </button>
         <button className={`sb-item ${state.meta.activeView === 'confluence' ? 'active' : ''}`} onClick={() => setView('confluence')}>
           <span className="sb-item-icon"><Icon name="doc" /></span>
           <span className="sb-item-label">Confluence</span>
+          {integrations.confluence?.connected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', marginLeft: 'auto', flexShrink: 0 }} />}
         </button>
 
         <div className="sb-section">
@@ -214,6 +225,7 @@ function App() {
               {state.meta.activeView === 'assistant' && <strong>Assistant</strong>}
               {state.meta.activeView === 'jira' && <strong>Jira</strong>}
               {state.meta.activeView === 'confluence' && <strong>Confluence</strong>}
+              {state.meta.activeView === 'integrations' && <strong>Integrations</strong>}
               {state.meta.activeView === 'project' && activeProject && (
                 <>
                   <button className="btn btn-ghost btn-sm" onClick={() => setView('portfolio')}>Portfolio</button>
@@ -261,6 +273,7 @@ function App() {
           {state.meta.activeView === 'assistant' && <Assistant state={state} />}
           {state.meta.activeView === 'jira' && <JiraView state={state} onOpenProject={(id) => setView('project', id)} />}
           {state.meta.activeView === 'confluence' && <ConfluenceView state={state} />}
+          {state.meta.activeView === 'integrations' && <IntegrationsView state={state} />}
           {state.meta.activeView === 'project' && activeProject && (
             <ProjectView state={state} projectId={activeProject.id} onOpenTask={setTaskModalId} onBack={() => setView('portfolio')} />
           )}

@@ -326,18 +326,40 @@ function staleProjects(state, days = 10) {
   });
 }
 
-// --- Global search across projects/tasks/notes/risks/jira/confluence ---
+// --- Global search across all entities and fields ---
 function globalSearch(state, q) {
-  if (!q || q.trim().length < 2) return { projects: [], tasks: [], notes: [], risks: [], jira: [], pages: [] };
+  if (!q || q.trim().length < 2) return { projects: [], tasks: [], notes: [], risks: [], milestones: [], meetings: [], blockers: [], jira: [], pages: [] };
   const needle = q.toLowerCase();
-  const m = (s) => s && s.toLowerCase().includes(needle);
+  const m = (s) => !!s && String(s).toLowerCase().includes(needle);
+  const any = (...vals) => vals.some(m);
+  const anyArr = (arr) => (arr || []).some(m);
+
+  const noteDisplayId = (n) => {
+    const num = n.id.replace(/^n-/, '');
+    if (n.kind === 'question') return `q-${num}`;
+    if (n.kind === 'decision') return `d-${num}`;
+    return `n-${num}`;
+  };
+
   return {
-    projects: state.projects.filter((p) => m(p.name) || m(p.code) || m(p.objective)),
-    tasks: state.tasks.filter((t) => m(t.title)),
-    notes: state.notes.filter((n) => m(n.title) || m(n.body) || (n.tags || []).some(m)),
-    risks: state.risks.filter((r) => m(r.title) || m(r.mitigation)),
-    jira: (state.jiraIssues || []).filter((i) => m(i.key) || m(i.summary) || m(i.description)),
-    pages: (state.confluencePages || []).filter((p) => m(p.title) || m(p.body) || (p.tags || []).some(m)),
+    projects: state.projects.filter((p) =>
+      any(p.id, p.code, p.name, p.objective, p.owner, p.status, p.priority)),
+    tasks: state.tasks.filter((t) =>
+      any(t.id, t.title, t.status, t.priority, t.source) || anyArr(t.tags)),
+    notes: state.notes.filter((n) =>
+      any(n.id, noteDisplayId(n), n.kind, n.title, n.body, n.context, n.options) || anyArr(n.tags)),
+    risks: state.risks.filter((r) =>
+      any(r.id, r.title, r.category, r.response, r.mitigation, r.trigger, r.impact, r.owner, r.status)),
+    milestones: state.milestones.filter((ms) =>
+      any(ms.id, ms.title, ms.deliverable, ms.status)),
+    meetings: (state.meetings || []).filter((mt) =>
+      any(mt.id, mt.title, mt.attendees, mt.notes, mt.recurrence)),
+    blockers: (state.blockers || []).filter((b) =>
+      any(b.id, b.description, b.waitingOn, b.kind)),
+    jira: (state.jiraIssues || []).filter((i) =>
+      any(i.key, i.summary, i.description, i.assignee, i.reporter, i.type, i.status) || anyArr(i.labels)),
+    pages: (state.confluencePages || []).filter((p) =>
+      any(p.title, p.body, p.space) || anyArr(p.tags)),
   };
 }
 
