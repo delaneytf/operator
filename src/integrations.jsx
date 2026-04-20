@@ -212,6 +212,7 @@ function IntegrationsView({ state }) {
     },
     {
       group: 'AI Assistants',
+      primaryAI: true,
       items: [
         {
           key: 'claude',
@@ -371,11 +372,44 @@ function IntegrationsView({ state }) {
         </div>
       </div>
 
-      {GROUPS.map((group) => (
+      {GROUPS.map((group) => {
+        const connectedAIs = group.primaryAI
+          ? group.items.filter(i => getIntg(i.key).connected).map(i => i.key)
+          : [];
+        const defaultAI = state.meta.defaultAI || connectedAIs[0] || null;
+        return (
         <div key={group.group} style={{ marginBottom: 32 }}>
           <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 8, paddingLeft: 2 }}>
             {group.group}
           </div>
+          {group.primaryAI && connectedAIs.length > 0 && (
+            <div className="card" style={{ padding: '10px 14px', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-2)', flexShrink: 0 }}>Primary model</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {connectedAIs.map(key => {
+                  const intg = group.items.find(i => i.key === key);
+                  const isActive = (defaultAI === key) || (connectedAIs.length === 1);
+                  return (
+                    <button key={key}
+                      onClick={() => actions.setMeta({ defaultAI: key })}
+                      style={{
+                        padding: '4px 12px', borderRadius: 20, fontSize: 11.5,
+                        fontFamily: 'inherit', cursor: 'pointer',
+                        border: isActive ? 'none' : '1px solid var(--line-2)',
+                        background: isActive ? 'var(--accent)' : 'transparent',
+                        color: isActive ? '#fff' : 'var(--fg-3)',
+                        transition: 'all 0.1s',
+                      }}>
+                      {intg?.logo} {intg?.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginLeft: 'auto' }}>
+                powers Assistant + Plan my day
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {group.items.map((intg) => {
               const cfg = getIntg(intg.key);
@@ -710,7 +744,8 @@ function IntegrationsView({ state }) {
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', borderTop: '1px solid var(--line)', paddingTop: 16 }}>
         Credentials are saved to <code>data/tokens.json</code> on the server — never transmitted to third parties.

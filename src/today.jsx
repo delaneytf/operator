@@ -696,10 +696,11 @@ function PlanMyDaySection({ state }) {
   };
 
   const callAI = async (system, userMsg) => {
+    const provider = state.meta.defaultAI || null;
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system, messages: [{ role: 'user', content: userMsg }] }),
+      body: JSON.stringify({ system, messages: [{ role: 'user', content: userMsg }], ...(provider && { provider }) }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);

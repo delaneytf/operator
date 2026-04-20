@@ -7,6 +7,7 @@ function App() {
   const [tweaksOpen, setTweaksOpen] = React.useState(false);
   const [topSearchQ, setTopSearchQ] = React.useState('');
   const [sbDoneOpen, setSbDoneOpen] = React.useState(false);
+  const [newProjInput, setNewProjInput] = React.useState(null); // null | { name, code }
 
   // Apply theme + density to <body>
   React.useEffect(() => {
@@ -145,16 +146,20 @@ function App() {
           <span className="sb-item-icon"><Icon name="target" /></span>
           <span className="sb-item-label">Assistant</span>
         </button>
-        <button className={`sb-item ${state.meta.activeView === 'jira' ? 'active' : ''}`} onClick={() => setView('jira')}>
-          <span className="sb-item-icon"><Icon name="grid" /></span>
-          <span className="sb-item-label">Jira</span>
-          {integrations.jira?.connected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', marginLeft: 'auto', flexShrink: 0 }} />}
-        </button>
-        <button className={`sb-item ${state.meta.activeView === 'confluence' ? 'active' : ''}`} onClick={() => setView('confluence')}>
-          <span className="sb-item-icon"><Icon name="doc" /></span>
-          <span className="sb-item-label">Confluence</span>
-          {integrations.confluence?.connected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', marginLeft: 'auto', flexShrink: 0 }} />}
-        </button>
+        {integrations.jira?.connected && (
+          <button className={`sb-item ${state.meta.activeView === 'jira' ? 'active' : ''}`} onClick={() => setView('jira')}>
+            <span className="sb-item-icon"><Icon name="grid" /></span>
+            <span className="sb-item-label">Jira</span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', marginLeft: 'auto', flexShrink: 0 }} />
+          </button>
+        )}
+        {integrations.confluence?.connected && (
+          <button className={`sb-item ${state.meta.activeView === 'confluence' ? 'active' : ''}`} onClick={() => setView('confluence')}>
+            <span className="sb-item-icon"><Icon name="doc" /></span>
+            <span className="sb-item-label">Confluence</span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', marginLeft: 'auto', flexShrink: 0 }} />
+          </button>
+        )}
 
         <div className="sb-section">
           <span>Projects</span>
@@ -182,17 +187,47 @@ function App() {
             return (
               <>
                 {activeProjs.map(renderProj)}
-                <button className="sb-proj" style={{ color: 'var(--fg-4)' }} onClick={() => {
-                  const name = prompt('Project name?');
-                  if (!name) return;
-                  const code = prompt('Short code (e.g. ATLAS)?', name.slice(0, 5).toUpperCase()) || name.slice(0, 5).toUpperCase();
-                  const proj = actions.addProject({ name, code, objective: '', color: 'slate', priority: 'medium', startDate: new Date().toISOString().slice(0, 10), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), successCriteria: [] });
-                  setView('project', proj.id);
-                }}>
-                  <span className="sb-proj-dot" style={{ background: 'var(--line-2)' }} />
-                  <span className="sb-proj-code">NEW</span>
-                  <span className="sb-proj-name">New project</span>
-                </button>
+                {newProjInput ? (
+                  <form
+                    style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const name = newProjInput.name.trim();
+                      if (!name) return;
+                      const code = (newProjInput.code.trim() || name.slice(0, 5)).toUpperCase();
+                      const proj = actions.addProject({ name, code, objective: '', color: 'slate', priority: 'medium', startDate: new Date().toISOString().slice(0, 10), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), successCriteria: [] });
+                      setNewProjInput(null);
+                      setView('project', proj.id);
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      className="input"
+                      style={{ fontSize: 12, padding: '4px 7px' }}
+                      placeholder="Project name"
+                      value={newProjInput.name}
+                      onChange={e => setNewProjInput(prev => ({ name: e.target.value, code: prev.code || e.target.value.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase() }))}
+                    />
+                    <input
+                      className="input"
+                      style={{ fontSize: 12, padding: '4px 7px', fontFamily: 'var(--mono)' }}
+                      placeholder="Short code (e.g. ATLAS)"
+                      value={newProjInput.code}
+                      onChange={e => setNewProjInput(prev => ({ ...prev, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }))}
+                      onKeyDown={e => { if (e.key === 'Escape') setNewProjInput(null); }}
+                    />
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={!newProjInput.name.trim()}>Create</button>
+                      <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProjInput(null)}>Cancel</button>
+                    </div>
+                  </form>
+                ) : (
+                  <button className="sb-proj" style={{ color: 'var(--fg-4)' }} onClick={() => setNewProjInput({ name: '', code: '' })}>
+                    <span className="sb-proj-dot" style={{ background: 'var(--line-2)' }} />
+                    <span className="sb-proj-code">NEW</span>
+                    <span className="sb-proj-name">New project</span>
+                  </button>
+                )}
                 {doneProjs.length > 0 && (
                   <>
                     <button className="sb-proj sb-proj-done-toggle" onClick={() => setSbDoneOpen((x) => !x)}>

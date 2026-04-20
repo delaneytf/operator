@@ -1,11 +1,17 @@
-// AI Assistant — grounded in full platform data + Jira + Confluence
+// AI Assistant — grounded in full platform data + connected integrations
 
 function Assistant({ state }) {
   const [activeThread, setActiveThread] = React.useState((state.chatThreads || [])[0]?.id || null);
   const [input, setInput] = React.useState('');
   const [busy, setBusy] = React.useState(false);
-  const [scope, setScope] = React.useState({ jira: true, confluence: true });
+  const [scope, setScope] = React.useState({}); // empty = all selected; key: false = deselected
   const scrollRef = React.useRef(null);
+
+  const integrations = state.meta.integrations || {};
+  const AI_KEYS = ['claude', 'openai', 'gemini'];
+  // Non-AI integrations that have data in state
+  const connectedIntgKeys = ['jira', 'confluence'].filter(k => integrations[k]?.connected);
+  const isInScope = (key) => scope[key] !== false;
 
   React.useEffect(() => {
     if (!activeThread && (state.chatThreads || [])[0]) setActiveThread(state.chatThreads[0].id);
@@ -26,14 +32,17 @@ function Assistant({ state }) {
     const keywords = q.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
     const score = (text) => keywords.reduce((a, k) => a + (text.toLowerCase().includes(k) ? 1 : 0), 0);
 
-    // Always-included app data
-    const projects = state.projects.map((p) => ({
+    // Filter by project scope
+    const scopedProjects = state.projects.filter(p => isInScope(`proj_${p.id}`));
+    const scopedProjectIds = new Set(scopedProjects.map(p => p.id));
+
+    const projects = scopedProjects.map((p) => ({
       id: p.id, code: p.code, name: p.name, status: p.status,
       dueDate: p.dueDate || null, owner: p.owner || null, objective: (p.objective || '').slice(0, 200),
     }));
 
     const tasks = state.tasks
-      .filter((t) => t.status !== 'done')
+      .filter((t) => t.status !== 'done' && (!t.projectId || scopedProjectIds.has(t.projectId)))
       .map((t) => {
         const proj = state.projects.find((p) => p.id === t.projectId);
         const taskBlockers = (state.blockers || []).filter((b) => b.taskId === t.id);
@@ -48,7 +57,7 @@ function Assistant({ state }) {
       .sort((a, b) => (['critical','high','medium','low'].indexOf(a.priority) - ['critical','high','medium','low'].indexOf(b.priority)));
 
     const risks = (state.risks || [])
-      .filter((r) => r.status !== 'closed')
+      .filter((r) => r.status !== 'closed' && (!r.projectId || scopedProjectIds.has(r.projectId)))
       .map((r) => {
         const proj = state.projects.find((p) => p.id === r.projectId);
         return {
@@ -92,14 +101,14 @@ function Assistant({ state }) {
         summary: (m.summary || '').slice(0, 200),
       }));
 
-    // Keyword-scored integrations
-    const jira = scope.jira ? state.jiraIssues
+    // Keyword-scored integrations (filtered by scope)
+    const jira = isInScope('jira') ? state.jiraIssues
       .map((i) => ({ i, score: score(`${i.key} ${i.summary} ${i.description || ''} ${(i.labels || []).join(' ')} ${i.assignee} ${i.status}`) }))
       .sort((a, b) => b.score - a.score).slice(0, 12)
       .map(({ i }) => ({ key: i.key, type: i.type, status: i.status, priority: i.priority, assignee: i.assignee, summary: i.summary, sprint: state.sprints.find((s) => s.id === i.sprintId)?.name, points: i.storyPoints, description: (i.description || '').slice(0, 240) }))
       : [];
 
-    const conf = scope.confluence ? state.confluencePages
+    const conf = isInScope('confluence') ? state.confluencePages
       .map((p) => ({ p, score: score(`${p.title} ${p.body} ${(p.tags || []).join(' ')}`) }))
       .sort((a, b) => b.score - a.score).slice(0, 5)
       .map(({ p }) => ({ id: p.id, title: p.title, space: state.confluenceSpaces.find((s) => s.id === p.spaceId)?.name, author: p.author, updated: p.updated, excerpt: p.body.slice(0, 500) }))
@@ -127,10 +136,11 @@ function Assistant({ state }) {
     const sys = `You are an AI assistant embedded in a project management tool. You have READ-ONLY access to all of the user's platform data: projects, tasks, risks, blockers, questions, decisions, meetings, plus Jira issues, sprints, and Confluence pages. Answer using ONLY the provided context. When referencing a task or risk use its title. When citing a Jira issue, use its key (e.g. ATL-412). When citing a Confluence page, use its title in quotes. If context is insufficient, say so. Be concise — 3–6 sentences or short bullets unless the user asks for more detail.`;
     const blob = `CONTEXT:\n\nPROJECTS:\n${JSON.stringify(ctx.projects, null, 2)}\n\nOPEN TASKS (sorted by priority):\n${JSON.stringify(ctx.tasks.slice(0, 30), null, 2)}\n\nOPEN RISKS:\n${JSON.stringify(ctx.risks.slice(0, 15), null, 2)}\n\nBLOCKERS:\n${JSON.stringify(ctx.blockers, null, 2)}\n\nOPEN QUESTIONS:\n${JSON.stringify(ctx.questions.slice(0, 10), null, 2)}\n\nRECENT DECISIONS:\n${JSON.stringify(ctx.decisions, null, 2)}\n\nRECENT MEETINGS:\n${JSON.stringify(ctx.meetings, null, 2)}\n\nSPRINTS:\n${JSON.stringify(ctx.sprints, null, 2)}\n\nJIRA ISSUES (keyword-matched):\n${JSON.stringify(ctx.jira, null, 2)}\n\nCONFLUENCE PAGES (keyword-matched):\n${JSON.stringify(ctx.confluence, null, 2)}\n\n---\nQUESTION: ${q}`;
     try {
+      const provider = state.meta.defaultAI || null;
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system: sys, messages: [{ role: 'user', content: blob }] }),
+        body: JSON.stringify({ system: sys, messages: [{ role: 'user', content: blob }], ...(provider && { provider }) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
@@ -158,7 +168,9 @@ function Assistant({ state }) {
         <div>
           <div className="row-flex" style={{ marginBottom: 4 }}>
             <Pill tone="accent"><Icon name="bolt" size={10} /> Assistant</Pill>
-            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>full platform context · Jira · Confluence</span>
+            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
+              full platform context{connectedIntgKeys.length > 0 ? ' · ' + connectedIntgKeys.join(' · ') : ''}
+            </span>
           </div>
           <div className="title-h1">Ask a question</div>
           <div className="title-sub">Answers sourced from your tasks, projects, risks, meetings, decisions, questions, sprints, and docs.</div>
@@ -181,12 +193,26 @@ function Assistant({ state }) {
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div className="card-head">
+          <div className="card-head" style={{ flexWrap: 'wrap', gap: 6 }}>
             <span className="card-head-title">{thread?.title || 'New conversation'}</span>
-            <div className="row-flex">
+            <div className="row-flex" style={{ flexWrap: 'wrap', gap: 4 }}>
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>scope:</span>
-              <button className={`seg-btn ${scope.jira ? 'active' : ''}`} style={{ border: '1px solid var(--line)', borderRadius: 4, padding: '2px 7px' }} onClick={() => setScope((s) => ({ ...s, jira: !s.jira }))}>Jira</button>
-              <button className={`seg-btn ${scope.confluence ? 'active' : ''}`} style={{ border: '1px solid var(--line)', borderRadius: 4, padding: '2px 7px' }} onClick={() => setScope((s) => ({ ...s, confluence: !s.confluence }))}>Confluence</button>
+              {connectedIntgKeys.map(key => (
+                <button key={key}
+                  className={`seg-btn ${isInScope(key) ? 'active' : ''}`}
+                  style={{ border: '1px solid var(--line)', borderRadius: 4, padding: '2px 7px', textTransform: 'capitalize' }}
+                  onClick={() => setScope(s => ({ ...s, [key]: !isInScope(key) }))}>
+                  {key}
+                </button>
+              ))}
+              {state.projects.map(p => (
+                <button key={p.id}
+                  className={`seg-btn ${isInScope(`proj_${p.id}`) ? 'active' : ''}`}
+                  style={{ border: '1px solid var(--line)', borderRadius: 4, padding: '2px 7px' }}
+                  onClick={() => setScope(s => ({ ...s, [`proj_${p.id}`]: !isInScope(`proj_${p.id}`) }))}>
+                  {p.code}
+                </button>
+              ))}
             </div>
           </div>
           <div ref={scrollRef} className="chat-scroll">
