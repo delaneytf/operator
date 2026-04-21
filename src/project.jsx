@@ -1,5 +1,46 @@
 // Project workspace — objective, milestones, tasks, notes, risks.
 
+function DependsOnSelect({ project, allProjects }) {
+  const [open, setOpen] = React.useState(false);
+  const deps = project.dependsOn || [];
+  const others = allProjects.filter(p => p.id !== project.id);
+
+  const toggle = (id) => {
+    const next = deps.includes(id) ? deps.filter(d => d !== id) : [...deps, id];
+    actions.updateProject(project.id, { dependsOn: next });
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        className="select proj-status-select"
+        style={{ padding: '2px 6px', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+        onClick={() => setOpen(o => !o)}
+      >
+        {deps.length === 0 ? 'No deps' : `${deps.length} dep${deps.length > 1 ? 's' : ''}`}
+        <Icon name={open ? 'chevronD' : 'chevronR'} size={9} />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.18)', minWidth: 200, padding: '4px 0', marginTop: 2 }}>
+          <div style={{ padding: '4px 10px 6px', fontSize: 10, color: 'var(--fg-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Depends on</div>
+          {others.map(p => (
+            <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+              onMouseLeave={e => e.currentTarget.style.background = ''}>
+              <input type="checkbox" checked={deps.includes(p.id)} onChange={() => toggle(p.id)} />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)' }}>{p.code}</span>
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-2)' }}>{p.name.split('—')[1]?.trim() || p.name}</span>
+            </label>
+          ))}
+          <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0 0' }}>
+            <button style={{ width: '100%', padding: '6px 12px', fontSize: 11, color: 'var(--fg-4)', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }} onClick={() => setOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProjectTaskAddForm({ project, onDone }) {
   const successCriteria = project.successCriteria || [];
   const emptyDraft = { title: '', status: 'todo', priority: 'medium', dueDate: '', estimate: '', objectiveId: '', description: '', source: 'planned' };
@@ -164,6 +205,9 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
                   <option key={pg.id} value={pg.id}>{pg.name}</option>
                 ))}
               </select>
+            )}
+            {state.projects.filter(p => p.id !== project.id).length > 0 && (
+              <DependsOnSelect project={project} allProjects={state.projects} />
             )}
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
               {fmtDate(project.startDate)} → {fmtDate(project.dueDate)}

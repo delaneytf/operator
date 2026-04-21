@@ -64,7 +64,7 @@ function App() {
   const critRiskCount = (state.risks || []).filter((r) => r.status !== 'closed' && r.severity * r.likelihood >= 12).length;
 
   // Drag-to-reorder nav tabs
-  const DEFAULT_TAB_ORDER = ['today', 'portfolio', 'calendar', 'meetings', 'tasks', 'decisions', 'questions', 'risks', 'review'];
+  const DEFAULT_TAB_ORDER = ['today', 'portfolio', 'roadmap', 'calendar', 'meetings', 'tasks', 'decisions', 'questions', 'risks', 'review'];
   const tabOrder = state.meta.tabOrder || DEFAULT_TAB_ORDER;
   const [dragId, setDragId] = React.useState(null);
   const [dragOverId, setDragOverId] = React.useState(null);
@@ -72,6 +72,7 @@ function App() {
   const TAB_META = {
     today:     { label: 'Today',        icon: 'sun',      hint: () => todayActionCount > 0 ? { count: todayActionCount, action: true } : null },
     portfolio: { label: 'Portfolio',    icon: 'grid',     hint: () => staleCount > 0 ? { count: staleCount, action: true } : null },
+    roadmap:   { label: 'Roadmap',      icon: 'timeline', hint: () => null },
     calendar:  { label: 'Calendar',     icon: 'calendar', hint: () => null },
     meetings:  { label: 'Meetings',     icon: 'clock',    hint: () => { const c = (state.meetings || []).length; return c > 0 ? { count: c } : null; } },
     tasks:     { label: 'Tasks',        icon: 'check',    hint: () => { const c = (state.tasks || []).filter((t) => t.status !== 'done').length; return c > 0 ? { count: c } : null; } },
@@ -166,10 +167,7 @@ function App() {
 
         <div className="sb-section">
           <span>Projects</span>
-          <span className="sb-section-count">{state.projects.filter((p) => p.status !== 'done').length}</span>
-          <button className="icon-btn" title="New program" style={{ marginLeft: 'auto', padding: '0 2px', opacity: 0.6 }} onClick={() => setNewProgInput(true)}>
-            <Icon name="plus" size={11} />
-          </button>
+          <span className="sb-section-count" style={{ marginLeft: 5 }}>{state.projects.filter((p) => p.status !== 'done').length}</span>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {(() => {
@@ -178,160 +176,159 @@ function App() {
             const allActive = byPrio(state.projects.filter((p) => p.status !== 'done'));
             const doneProjs = byPrio(state.projects.filter((p) => p.status === 'done'));
 
-            const renderProj = (p, indent = false) => {
+            const renderProj = (p) => {
               const prog = projectProgress(state, p.id);
               const risk = projectRiskScore(state, p.id);
               const active = state.meta.activeView === 'project' && state.meta.activeProjectId === p.id;
               return (
-                <button key={p.id} className={`sb-proj ${active ? 'active' : ''} ${p.status === 'done' ? 'sb-proj-done' : ''}`}
-                  style={indent ? { paddingLeft: 20 } : {}}
-                  onClick={() => setView('project', p.id)}>
+                <button key={p.id} className={`sb-proj ${active ? 'active' : ''} ${p.status === 'done' ? 'sb-proj-done' : ''}`} onClick={() => setView('project', p.id)}>
                   <span className={`sb-proj-dot pc-${p.status}`} />
                   <span className="sb-proj-code">{p.code}</span>
                   <span className="sb-proj-name truncate">{p.name.split('—')[1]?.trim() || p.name}</span>
                   <span className="sb-proj-meta">{prog.pct}%</span>
-                  {risk.peak >= 12 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)' }} />}
+                  {risk.peak >= 12 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)', flexShrink: 0 }} />}
                 </button>
               );
             };
 
-            const newProjForm = (
-              newProjInput ? (
-                <form
-                  style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const name = newProjInput.name.trim();
-                    if (!name) return;
-                    const code = (newProjInput.code.trim() || name.slice(0, 5)).toUpperCase();
-                    const proj = actions.addProject({ name, code, objective: '', color: 'slate', priority: 'medium', programId: newProjInput.programId || null, startDate: new Date().toISOString().slice(0, 10), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), successCriteria: [] });
-                    setNewProjInput(null);
-                    setView('project', proj.id);
-                  }}
-                >
-                  <input autoFocus className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Project name"
-                    value={newProjInput.name}
-                    onChange={e => setNewProjInput(prev => ({ ...prev, name: e.target.value, code: prev.code || e.target.value.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase() }))}
-                  />
-                  <input className="input" style={{ fontSize: 12, padding: '4px 7px', fontFamily: 'var(--mono)' }} placeholder="Short code (e.g. ATLAS)"
-                    value={newProjInput.code}
-                    onChange={e => setNewProjInput(prev => ({ ...prev, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }))}
-                    onKeyDown={e => { if (e.key === 'Escape') setNewProjInput(null); }}
-                  />
-                  {programs.length > 0 && (
-                    <select className="input" style={{ fontSize: 12, padding: '4px 7px' }}
-                      value={newProjInput.programId || ''}
-                      onChange={e => setNewProjInput(prev => ({ ...prev, programId: e.target.value || null }))}>
-                      <option value="">No program</option>
-                      {programs.map(pg => <option key={pg.id} value={pg.id}>{pg.name}</option>)}
-                    </select>
-                  )}
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={!newProjInput.name.trim()}>Create</button>
-                    <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProjInput(null)}>Cancel</button>
-                  </div>
-                </form>
-              ) : (
-                <button className="sb-proj" style={{ color: 'var(--fg-4)' }} onClick={() => setNewProjInput({ name: '', code: '', programId: null })}>
-                  <span className="sb-proj-dot" style={{ background: 'var(--line-2)' }} />
-                  <span className="sb-proj-code">NEW</span>
-                  <span className="sb-proj-name">New project</span>
-                </button>
-              )
+            const submitNewProj = (e) => {
+              e.preventDefault();
+              const name = newProjInput.name.trim();
+              if (!name) return;
+              const code = (newProjInput.code.trim() || name.slice(0, 5)).toUpperCase();
+              const proj = actions.addProject({ name, code, objective: '', color: 'slate', priority: 'medium', programId: newProjInput.programId || null, startDate: new Date().toISOString().slice(0, 10), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), successCriteria: [] });
+              setNewProjInput(null);
+              setView('project', proj.id);
+            };
+
+            const NewProjForm = ({ indented }) => (
+              <form className={`sb-new-proj-form${indented ? ' indented' : ''}`} onSubmit={submitNewProj}>
+                <input autoFocus className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Project name"
+                  value={newProjInput.name}
+                  onChange={e => setNewProjInput(prev => ({ ...prev, name: e.target.value, code: prev.codeEdited ? prev.code : e.target.value.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase() }))}
+                  onKeyDown={e => { if (e.key === 'Escape') setNewProjInput(null); }}
+                />
+                <input className="input" style={{ fontSize: 12, padding: '4px 7px', fontFamily: 'var(--mono)' }} placeholder="Code (e.g. ATLAS)"
+                  value={newProjInput.code}
+                  onChange={e => setNewProjInput(prev => ({ ...prev, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8), codeEdited: true }))}
+                  onKeyDown={e => { if (e.key === 'Escape') setNewProjInput(null); }}
+                />
+                <div className="sb-form-row">
+                  <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={!newProjInput.name.trim()}>Create</button>
+                  <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProjInput(null)}>Cancel</button>
+                </div>
+              </form>
             );
 
             const ungrouped = allActive.filter((p) => !p.programId || !programs.find((pg) => pg.id === p.programId));
 
             return (
               <>
-                {/* New program inline form */}
+                {/* Program groups */}
+                {programs.map((pg) => {
+                  const pgProjs = allActive.filter((p) => p.programId === pg.id);
+                  const collapsed = collapsedPrograms[pg.id];
+                  const isEditing = editingProgram?.id === pg.id;
+                  return (
+                    <React.Fragment key={pg.id}>
+                      <div className="sb-program-row">
+                        <button className="sb-program-toggle" onClick={() => setCollapsedPrograms((x) => ({ ...x, [pg.id]: !x[pg.id] }))}>
+                          <Icon name={collapsed ? 'chevronR' : 'chevronD'} size={9} />
+                        </button>
+                        <span className="sb-program-name" title={pg.description || undefined}>{pg.name}</span>
+                        {pgProjs.length > 0 && <span className="sb-program-count">{pgProjs.length}</span>}
+                        <div className="sb-program-actions">
+                          <button className="sb-program-btn" title="Add project to program"
+                            onClick={() => { setNewProjInput({ name: '', code: '', programId: pg.id }); setCollapsedPrograms((x) => ({ ...x, [pg.id]: false })); }}>
+                            <Icon name="plus" size={10} />
+                          </button>
+                          <button className="sb-program-btn" title="Edit program"
+                            onClick={() => setEditingProgram(isEditing ? null : { id: pg.id, name: pg.name, description: pg.description || '' })}>
+                            <Icon name="edit" size={10} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {isEditing && (
+                        <form className="sb-program-edit-form"
+                          onSubmit={(e) => { e.preventDefault(); actions.updateProgram(pg.id, { name: editingProgram.name, description: editingProgram.description }); setEditingProgram(null); }}>
+                          <input autoFocus className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Program name"
+                            value={editingProgram.name}
+                            onChange={e => setEditingProgram(prev => ({ ...prev, name: e.target.value }))}
+                            onKeyDown={e => { if (e.key === 'Escape') setEditingProgram(null); }} />
+                          <input className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Description (optional)"
+                            value={editingProgram.description}
+                            onChange={e => setEditingProgram(prev => ({ ...prev, description: e.target.value }))} />
+                          <div className="sb-form-row">
+                            <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={!editingProgram.name.trim()}>Save</button>
+                            <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setEditingProgram(null)}>Cancel</button>
+                            <button type="button" className="btn btn-sm" style={{ fontSize: 11, color: 'var(--danger)' }}
+                              onClick={() => { if (confirm(`Delete "${pg.name}"? Projects will become ungrouped.`)) { actions.deleteProgram(pg.id); setEditingProgram(null); } }}>Delete</button>
+                          </div>
+                        </form>
+                      )}
+
+                      {!collapsed && (
+                        <div className="sb-program-inner">
+                          {pgProjs.map(renderProj)}
+                          {newProjInput && newProjInput.programId === pg.id && <NewProjForm indented={false} />}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* Ungrouped projects (no program, or programs don't exist) */}
+                {programs.length > 0 && ungrouped.length > 0 && (
+                  <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--line)' }} />
+                )}
+                {ungrouped.map(renderProj)}
+
+                {/* New project form (ungrouped) */}
+                {newProjInput && newProjInput.programId == null && <NewProjForm indented={false} />}
+
+                {/* Ghost action buttons */}
+                {!newProjInput && !newProgInput && (
+                  <button className="sb-ghost-btn" onClick={() => setNewProjInput({ name: '', code: '', programId: null })}>
+                    <Icon name="plus" size={11} />
+                    New project
+                  </button>
+                )}
+                {!newProgInput && !newProjInput && (
+                  <button className="sb-ghost-btn" onClick={() => setNewProgInput(true)}>
+                    <Icon name="folder" size={11} />
+                    New program
+                  </button>
+                )}
+
+                {/* New program form */}
                 {newProgInput && (
-                  <form style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}
+                  <form className="sb-new-proj-form"
                     onSubmit={(e) => {
                       e.preventDefault();
                       const name = e.target.elements.pgName.value.trim();
                       if (!name) return;
-                      const desc = e.target.elements.pgDesc.value.trim();
-                      actions.addProgram({ name, description: desc });
+                      actions.addProgram({ name, description: e.target.elements.pgDesc.value.trim() });
                       setNewProgInput(false);
                     }}>
                     <input autoFocus name="pgName" className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Program name"
                       onKeyDown={e => { if (e.key === 'Escape') setNewProgInput(false); }} />
                     <input name="pgDesc" className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Description (optional)" />
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }}>Create Program</button>
+                    <div className="sb-form-row">
+                      <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }}>Create program</button>
                       <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProgInput(false)}>Cancel</button>
                     </div>
                   </form>
                 )}
 
-                {/* Program groups */}
-                {programs.map((pg) => {
-                  const pgProjs = allActive.filter((p) => p.programId === pg.id);
-                  const collapsed = collapsedPrograms[pg.id];
-                  return (
-                    <React.Fragment key={pg.id}>
-                      <div style={{ display: 'flex', alignItems: 'center', padding: '5px 8px 3px', gap: 4 }}>
-                        <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--fg-4)', display: 'flex', alignItems: 'center' }}
-                          onClick={() => setCollapsedPrograms((x) => ({ ...x, [pg.id]: !x[pg.id] }))}>
-                          <Icon name={collapsed ? 'chevronR' : 'chevronD'} size={9} />
-                        </button>
-                        {editingProgram?.id === pg.id ? (
-                          <form style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              actions.updateProgram(pg.id, { name: editingProgram.name, description: editingProgram.description });
-                              setEditingProgram(null);
-                            }}>
-                            <input autoFocus className="input" style={{ fontSize: 11, padding: '2px 5px' }} value={editingProgram.name}
-                              onChange={e => setEditingProgram(prev => ({ ...prev, name: e.target.value }))}
-                              onKeyDown={e => { if (e.key === 'Escape') setEditingProgram(null); }} />
-                            <input className="input" style={{ fontSize: 11, padding: '2px 5px' }} value={editingProgram.description}
-                              placeholder="Description"
-                              onChange={e => setEditingProgram(prev => ({ ...prev, description: e.target.value }))} />
-                            <div style={{ display: 'flex', gap: 3 }}>
-                              <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 10 }}>Save</button>
-                              <button type="button" className="btn btn-sm" style={{ fontSize: 10 }} onClick={() => setEditingProgram(null)}>Cancel</button>
-                              <button type="button" className="btn btn-sm" style={{ fontSize: 10, color: 'var(--danger)' }}
-                                onClick={() => { if (confirm(`Delete program "${pg.name}"?`)) { actions.deleteProgram(pg.id); setEditingProgram(null); } }}>Del</button>
-                            </div>
-                          </form>
-                        ) : (
-                          <>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-2)', flex: 1, truncate: true, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              title={pg.description || pg.name}>{pg.name}</span>
-                            <button className="icon-btn" style={{ opacity: 0, padding: '0 2px' }}
-                              title="Edit program"
-                              onClick={() => setEditingProgram({ id: pg.id, name: pg.name, description: pg.description || '' })}
-                              onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                              onMouseLeave={e => e.currentTarget.style.opacity = 0}>
-                              <Icon name="edit" size={10} />
-                            </button>
-                            <button className="icon-btn" style={{ opacity: 0.5, padding: '0 2px' }}
-                              title="Add project to program"
-                              onClick={() => setNewProjInput({ name: '', code: '', programId: pg.id })}>
-                              <Icon name="plus" size={10} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                      {!collapsed && pgProjs.map((p) => renderProj(p, true))}
-                      {!collapsed && newProjInput?.programId === pg.id && newProjForm}
-                    </React.Fragment>
-                  );
-                })}
-
-                {/* Ungrouped projects */}
-                {ungrouped.map((p) => renderProj(p, false))}
-                {(!newProjInput || newProjInput.programId == null) && newProjForm}
-
+                {/* Done projects */}
                 {doneProjs.length > 0 && (
                   <>
                     <button className="sb-proj sb-proj-done-toggle" onClick={() => setSbDoneOpen((x) => !x)}>
                       <Icon name={sbDoneOpen ? 'chevronD' : 'chevronR'} size={9} />
                       <span className="sb-proj-name" style={{ color: 'var(--fg-4)', fontSize: 10.5 }}>Done ({doneProjs.length})</span>
                     </button>
-                    {sbDoneOpen && doneProjs.map((p) => renderProj(p, false))}
+                    {sbDoneOpen && doneProjs.map(renderProj)}
                   </>
                 )}
               </>
@@ -360,6 +357,7 @@ function App() {
             <div className="crumbs">
               {state.meta.activeView === 'today' && <strong>Today <span style={{ fontWeight: 400, color: 'var(--fg-4)' }}>· {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></strong>}
               {state.meta.activeView === 'portfolio' && <strong>Portfolio</strong>}
+              {state.meta.activeView === 'roadmap' && <strong>Roadmap</strong>}
               {state.meta.activeView === 'calendar' && <strong>Calendar</strong>}
               {state.meta.activeView === 'tasks' && <strong>Tasks</strong>}
               {state.meta.activeView === 'decisions' && <strong>Decisions</strong>}
@@ -408,6 +406,7 @@ function App() {
         <div className="content" style={{ fontFamily: "Helvetica" }}>
           {state.meta.activeView === 'today' && <Today state={state} onOpenTask={setTaskModalId} onOpenProject={(id) => setView('project', id)} />}
           {state.meta.activeView === 'portfolio' && <Portfolio state={state} onOpenProject={(id) => setView('project', id)} onOpenTask={setTaskModalId} />}
+          {state.meta.activeView === 'roadmap' && <RoadmapView state={state} />}
           {state.meta.activeView === 'calendar' && <CalendarView state={state} onOpenMeeting={(id) => actions.setMeta({ activeView: 'meetings', activeMeetingId: id })} />}
           {state.meta.activeView === 'tasks' && <TasksView state={state} onOpenTask={setTaskModalId} />}
           {state.meta.activeView === 'decisions' && <DecisionsView state={state} />}

@@ -161,6 +161,8 @@ function Icon({ name, size = 14, className = '' }) {
     filter: <path d="M2.5 3 L13.5 3 L9.5 8 L9.5 13 L6.5 11.5 L6.5 8 Z" />,
     link: <><path d="M6.5 9.5 L9.5 6.5" /><path d="M9 4.5 A 2.5 2.5 0 0 1 12 7.5 L10.5 9" /><path d="M7 11 L5.5 12.5 A 2.5 2.5 0 0 1 2.5 9.5 L4 8" /></>,
     ext: <><path d="M8 3 H 3 V 13 H 13 V 8" /><path d="M10 3 H 13 V 6" /><line x1="7" y1="9" x2="13" y2="3" /></>,
+    folder: <><path d="M2 4.5 L2 12.5 L14 12.5 L14 6.5 L7 6.5 L5.5 4.5 Z" /></>,
+    timeline: <><line x1="2" y1="4" x2="2" y2="12" /><line x1="2" y1="4" x2="10" y2="4" /><line x1="2" y1="8" x2="13" y2="8" /><line x1="2" y1="12" x2="8" y2="12" /></>,
   };
   return <svg {...props}>{paths[name] || null}</svg>;
 }
