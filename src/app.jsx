@@ -316,7 +316,7 @@ function App() {
                         )}
                       </div>
                       {!collapsed && pgProjs.map((p) => renderProj(p, true))}
-                      {!collapsed && newProjInput?.programId === pg.id && newProjInput}
+                      {!collapsed && newProjInput?.programId === pg.id && newProjForm}
                     </React.Fragment>
                   );
                 })}
