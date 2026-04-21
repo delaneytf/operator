@@ -4,9 +4,14 @@ node_modules/
 # Environment variables — NEVER commit this file
 .env
 
-# App data — your project data lives here; commit or ignore as you prefer.
-# Uncomment the line below to exclude it from git:
-# data/data.json
+# App data
+data/
+
+# Claude Code session memory
+.claude/
+
+# Build output
+dist/
 
 # macOS
 .DS_Store
