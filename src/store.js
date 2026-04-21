@@ -187,6 +187,23 @@ const actions = {
     }));
   },
 
+  // Programs
+  addProgram(p) {
+    const prog = { id: uid('pg'), name: p.name || 'New Program', description: p.description || '', createdAt: todayStr() };
+    setState((s) => ({ ...s, programs: [...(s.programs || []), prog] }));
+    return prog;
+  },
+  updateProgram(id, patch) {
+    setState((s) => ({ ...s, programs: (s.programs || []).map((pg) => (pg.id === id ? { ...pg, ...patch } : pg)) }));
+  },
+  deleteProgram(id) {
+    setState((s) => ({
+      ...s,
+      programs: (s.programs || []).filter((pg) => pg.id !== id),
+      projects: s.projects.map((p) => p.programId === id ? { ...p, programId: null } : p),
+    }));
+  },
+
   // Projects
   addProject(p) {
     const proj = {

@@ -8,6 +8,9 @@ function App() {
   const [topSearchQ, setTopSearchQ] = React.useState('');
   const [sbDoneOpen, setSbDoneOpen] = React.useState(false);
   const [newProjInput, setNewProjInput] = React.useState(null); // null | { name, code }
+  const [newProgInput, setNewProgInput] = React.useState(false);
+  const [collapsedPrograms, setCollapsedPrograms] = React.useState({});
+  const [editingProgram, setEditingProgram] = React.useState(null); // null | { id, name, description }
 
   // Apply theme + density to <body>
   React.useEffect(() => {
@@ -164,18 +167,25 @@ function App() {
         <div className="sb-section">
           <span>Projects</span>
           <span className="sb-section-count">{state.projects.filter((p) => p.status !== 'done').length}</span>
+          <button className="icon-btn" title="New program" style={{ marginLeft: 'auto', padding: '0 2px', opacity: 0.6 }} onClick={() => setNewProgInput(true)}>
+            <Icon name="plus" size={11} />
+          </button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {(() => {
+            const programs = state.programs || [];
             const byPrio = (arr) => arr.slice().sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
-            const activeProjs = byPrio(state.projects.filter((p) => p.status !== 'done'));
+            const allActive = byPrio(state.projects.filter((p) => p.status !== 'done'));
             const doneProjs = byPrio(state.projects.filter((p) => p.status === 'done'));
-            const renderProj = (p) => {
+
+            const renderProj = (p, indent = false) => {
               const prog = projectProgress(state, p.id);
               const risk = projectRiskScore(state, p.id);
               const active = state.meta.activeView === 'project' && state.meta.activeProjectId === p.id;
               return (
-                <button key={p.id} className={`sb-proj ${active ? 'active' : ''} ${p.status === 'done' ? 'sb-proj-done' : ''}`} onClick={() => setView('project', p.id)}>
+                <button key={p.id} className={`sb-proj ${active ? 'active' : ''} ${p.status === 'done' ? 'sb-proj-done' : ''}`}
+                  style={indent ? { paddingLeft: 20 } : {}}
+                  onClick={() => setView('project', p.id)}>
                   <span className={`sb-proj-dot pc-${p.status}`} />
                   <span className="sb-proj-code">{p.code}</span>
                   <span className="sb-proj-name truncate">{p.name.split('—')[1]?.trim() || p.name}</span>
@@ -184,57 +194,144 @@ function App() {
                 </button>
               );
             };
+
+            const newProjForm = (
+              newProjInput ? (
+                <form
+                  style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const name = newProjInput.name.trim();
+                    if (!name) return;
+                    const code = (newProjInput.code.trim() || name.slice(0, 5)).toUpperCase();
+                    const proj = actions.addProject({ name, code, objective: '', color: 'slate', priority: 'medium', programId: newProjInput.programId || null, startDate: new Date().toISOString().slice(0, 10), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), successCriteria: [] });
+                    setNewProjInput(null);
+                    setView('project', proj.id);
+                  }}
+                >
+                  <input autoFocus className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Project name"
+                    value={newProjInput.name}
+                    onChange={e => setNewProjInput(prev => ({ ...prev, name: e.target.value, code: prev.code || e.target.value.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase() }))}
+                  />
+                  <input className="input" style={{ fontSize: 12, padding: '4px 7px', fontFamily: 'var(--mono)' }} placeholder="Short code (e.g. ATLAS)"
+                    value={newProjInput.code}
+                    onChange={e => setNewProjInput(prev => ({ ...prev, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }))}
+                    onKeyDown={e => { if (e.key === 'Escape') setNewProjInput(null); }}
+                  />
+                  {programs.length > 0 && (
+                    <select className="input" style={{ fontSize: 12, padding: '4px 7px' }}
+                      value={newProjInput.programId || ''}
+                      onChange={e => setNewProjInput(prev => ({ ...prev, programId: e.target.value || null }))}>
+                      <option value="">No program</option>
+                      {programs.map(pg => <option key={pg.id} value={pg.id}>{pg.name}</option>)}
+                    </select>
+                  )}
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={!newProjInput.name.trim()}>Create</button>
+                    <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProjInput(null)}>Cancel</button>
+                  </div>
+                </form>
+              ) : (
+                <button className="sb-proj" style={{ color: 'var(--fg-4)' }} onClick={() => setNewProjInput({ name: '', code: '', programId: null })}>
+                  <span className="sb-proj-dot" style={{ background: 'var(--line-2)' }} />
+                  <span className="sb-proj-code">NEW</span>
+                  <span className="sb-proj-name">New project</span>
+                </button>
+              )
+            );
+
+            const ungrouped = allActive.filter((p) => !p.programId || !programs.find((pg) => pg.id === p.programId));
+
             return (
               <>
-                {activeProjs.map(renderProj)}
-                {newProjInput ? (
-                  <form
-                    style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}
+                {/* New program inline form */}
+                {newProgInput && (
+                  <form style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}
                     onSubmit={(e) => {
                       e.preventDefault();
-                      const name = newProjInput.name.trim();
+                      const name = e.target.elements.pgName.value.trim();
                       if (!name) return;
-                      const code = (newProjInput.code.trim() || name.slice(0, 5)).toUpperCase();
-                      const proj = actions.addProject({ name, code, objective: '', color: 'slate', priority: 'medium', startDate: new Date().toISOString().slice(0, 10), dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), successCriteria: [] });
-                      setNewProjInput(null);
-                      setView('project', proj.id);
-                    }}
-                  >
-                    <input
-                      autoFocus
-                      className="input"
-                      style={{ fontSize: 12, padding: '4px 7px' }}
-                      placeholder="Project name"
-                      value={newProjInput.name}
-                      onChange={e => setNewProjInput(prev => ({ name: e.target.value, code: prev.code || e.target.value.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase() }))}
-                    />
-                    <input
-                      className="input"
-                      style={{ fontSize: 12, padding: '4px 7px', fontFamily: 'var(--mono)' }}
-                      placeholder="Short code (e.g. ATLAS)"
-                      value={newProjInput.code}
-                      onChange={e => setNewProjInput(prev => ({ ...prev, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) }))}
-                      onKeyDown={e => { if (e.key === 'Escape') setNewProjInput(null); }}
-                    />
+                      const desc = e.target.elements.pgDesc.value.trim();
+                      actions.addProgram({ name, description: desc });
+                      setNewProgInput(false);
+                    }}>
+                    <input autoFocus name="pgName" className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Program name"
+                      onKeyDown={e => { if (e.key === 'Escape') setNewProgInput(false); }} />
+                    <input name="pgDesc" className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Description (optional)" />
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={!newProjInput.name.trim()}>Create</button>
-                      <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProjInput(null)}>Cancel</button>
+                      <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }}>Create Program</button>
+                      <button type="button" className="btn btn-sm" style={{ fontSize: 11 }} onClick={() => setNewProgInput(false)}>Cancel</button>
                     </div>
                   </form>
-                ) : (
-                  <button className="sb-proj" style={{ color: 'var(--fg-4)' }} onClick={() => setNewProjInput({ name: '', code: '' })}>
-                    <span className="sb-proj-dot" style={{ background: 'var(--line-2)' }} />
-                    <span className="sb-proj-code">NEW</span>
-                    <span className="sb-proj-name">New project</span>
-                  </button>
                 )}
+
+                {/* Program groups */}
+                {programs.map((pg) => {
+                  const pgProjs = allActive.filter((p) => p.programId === pg.id);
+                  const collapsed = collapsedPrograms[pg.id];
+                  return (
+                    <React.Fragment key={pg.id}>
+                      <div style={{ display: 'flex', alignItems: 'center', padding: '5px 8px 3px', gap: 4 }}>
+                        <button style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--fg-4)', display: 'flex', alignItems: 'center' }}
+                          onClick={() => setCollapsedPrograms((x) => ({ ...x, [pg.id]: !x[pg.id] }))}>
+                          <Icon name={collapsed ? 'chevronR' : 'chevronD'} size={9} />
+                        </button>
+                        {editingProgram?.id === pg.id ? (
+                          <form style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              actions.updateProgram(pg.id, { name: editingProgram.name, description: editingProgram.description });
+                              setEditingProgram(null);
+                            }}>
+                            <input autoFocus className="input" style={{ fontSize: 11, padding: '2px 5px' }} value={editingProgram.name}
+                              onChange={e => setEditingProgram(prev => ({ ...prev, name: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Escape') setEditingProgram(null); }} />
+                            <input className="input" style={{ fontSize: 11, padding: '2px 5px' }} value={editingProgram.description}
+                              placeholder="Description"
+                              onChange={e => setEditingProgram(prev => ({ ...prev, description: e.target.value }))} />
+                            <div style={{ display: 'flex', gap: 3 }}>
+                              <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 10 }}>Save</button>
+                              <button type="button" className="btn btn-sm" style={{ fontSize: 10 }} onClick={() => setEditingProgram(null)}>Cancel</button>
+                              <button type="button" className="btn btn-sm" style={{ fontSize: 10, color: 'var(--danger)' }}
+                                onClick={() => { if (confirm(`Delete program "${pg.name}"?`)) { actions.deleteProgram(pg.id); setEditingProgram(null); } }}>Del</button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-2)', flex: 1, truncate: true, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              title={pg.description || pg.name}>{pg.name}</span>
+                            <button className="icon-btn" style={{ opacity: 0, padding: '0 2px' }}
+                              title="Edit program"
+                              onClick={() => setEditingProgram({ id: pg.id, name: pg.name, description: pg.description || '' })}
+                              onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                              onMouseLeave={e => e.currentTarget.style.opacity = 0}>
+                              <Icon name="edit" size={10} />
+                            </button>
+                            <button className="icon-btn" style={{ opacity: 0.5, padding: '0 2px' }}
+                              title="Add project to program"
+                              onClick={() => setNewProjInput({ name: '', code: '', programId: pg.id })}>
+                              <Icon name="plus" size={10} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {!collapsed && pgProjs.map((p) => renderProj(p, true))}
+                      {!collapsed && newProjInput?.programId === pg.id && newProjInput}
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* Ungrouped projects */}
+                {ungrouped.map((p) => renderProj(p, false))}
+                {(!newProjInput || newProjInput.programId == null) && newProjForm}
+
                 {doneProjs.length > 0 && (
                   <>
                     <button className="sb-proj sb-proj-done-toggle" onClick={() => setSbDoneOpen((x) => !x)}>
                       <Icon name={sbDoneOpen ? 'chevronD' : 'chevronR'} size={9} />
                       <span className="sb-proj-name" style={{ color: 'var(--fg-4)', fontSize: 10.5 }}>Done ({doneProjs.length})</span>
                     </button>
-                    {sbDoneOpen && doneProjs.map(renderProj)}
+                    {sbDoneOpen && doneProjs.map((p) => renderProj(p, false))}
                   </>
                 )}
               </>
