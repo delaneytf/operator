@@ -545,6 +545,33 @@ const actions = {
     setState((s) => ({ ...s, confluenceSpaces: confluenceSpaces || s.confluenceSpaces, confluencePages: confluencePages || s.confluencePages }));
   },
 
+  // Shift a project and all its associated dates by deltaDays (atomic single setState)
+  shiftProjectDates(projectId, deltaDays) {
+    if (!deltaDays || deltaDays === 0) return;
+    const shift = (s) => {
+      if (!s) return s;
+      const d = new Date(s + 'T00:00:00');
+      d.setDate(d.getDate() + deltaDays);
+      return d.toISOString().slice(0, 10);
+    };
+    const today = todayStr();
+    setState((s) => ({
+      ...s,
+      projects: s.projects.map((p) => p.id === projectId
+        ? { ...p, startDate: shift(p.startDate), dueDate: shift(p.dueDate) }
+        : p),
+      milestones: s.milestones.map((m) => m.projectId === projectId
+        ? { ...m, date: shift(m.date) }
+        : m),
+      tasks: s.tasks.map((t) => (t.projectId === projectId && t.dueDate)
+        ? { ...t, dueDate: shift(t.dueDate), updatedAt: today }
+        : t),
+      risks: s.risks.map((r) => (r.projectId === projectId && r.dueDate)
+        ? { ...r, dueDate: shift(r.dueDate), updatedAt: today }
+        : r),
+    }));
+  },
+
   // Admin
   resetAll() {
     localStorage.removeItem(getStorageKey());

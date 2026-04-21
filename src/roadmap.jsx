@@ -71,13 +71,6 @@ function RoadmapView({ state }) {
   }, [zoom]);
 
   // ── drag-to-move bar ───────────────────────────────────────────────────────
-  const shiftDate = (s, deltaDays) => {
-    if (!s) return s;
-    const d = new Date(s + 'T00:00:00');
-    d.setDate(d.getDate() + deltaDays);
-    return d.toISOString().slice(0, 10);
-  };
-
   React.useEffect(() => {
     if (!dragging) return;
     const onMove = (e) => setDragging(prev => ({ ...prev, deltaX: e.clientX - prev.startX }));
@@ -85,22 +78,7 @@ function RoadmapView({ state }) {
       const deltaDays = Math.round((e.clientX - dragging.startX) / dayPx);
       if (deltaDays !== 0) {
         didDragRef.current = true;
-        const proj = projects.find(p => p.id === dragging.projId);
-        if (proj) {
-          actions.updateProject(proj.id, {
-            startDate: shiftDate(proj.startDate, deltaDays),
-            dueDate:   shiftDate(proj.dueDate,   deltaDays),
-          });
-          milestones.filter(m => m.projectId === proj.id).forEach(m =>
-            actions.updateMilestone(m.id, { date: shiftDate(m.date, deltaDays) })
-          );
-          (state.tasks || []).filter(t => t.projectId === proj.id && t.dueDate).forEach(t =>
-            actions.updateTask(t.id, { dueDate: shiftDate(t.dueDate, deltaDays) })
-          );
-          (state.risks || []).filter(r => r.projectId === proj.id && r.dueDate).forEach(r =>
-            actions.updateRisk(r.id, { dueDate: shiftDate(r.dueDate, deltaDays) })
-          );
-        }
+        actions.shiftProjectDates(dragging.projId, deltaDays);
       }
       setDragging(null);
     };

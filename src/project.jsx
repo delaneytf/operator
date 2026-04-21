@@ -209,9 +209,32 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
             {state.projects.filter(p => p.id !== project.id).length > 0 && (
               <DependsOnSelect project={project} allProjects={state.projects} />
             )}
-            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
-              {fmtDate(project.startDate)} → {fmtDate(project.dueDate)}
-            </span>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>Start</span>
+            <input
+              type="date"
+              className="input"
+              style={{ fontSize: 11, padding: '2px 6px', width: 130 }}
+              value={project.startDate || ''}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (!next || !project.startDate) { actions.updateProject(project.id, { startDate: next }); return; }
+                const delta = Math.round((new Date(next + 'T00:00:00') - new Date(project.startDate + 'T00:00:00')) / 86400000);
+                actions.shiftProjectDates(project.id, delta);
+              }}
+            />
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>→</span>
+            <input
+              type="date"
+              className="input"
+              style={{ fontSize: 11, padding: '2px 6px', width: 130 }}
+              value={project.dueDate || ''}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (!next || !project.dueDate) { actions.updateProject(project.id, { dueDate: next }); return; }
+                const delta = Math.round((new Date(next + 'T00:00:00') - new Date(project.dueDate + 'T00:00:00')) / 86400000);
+                actions.shiftProjectDates(project.id, delta);
+              }}
+            />
           </div>
           <div className="title-h1" style={{ marginBottom: 6 }}>
             <InlineEdit
