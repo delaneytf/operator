@@ -152,6 +152,19 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
               <option value="blocked">Blocked</option>
               <option value="done">Done ✓</option>
             </select>
+            {(state.programs || []).length > 0 && (
+              <select
+                className="select proj-status-select"
+                style={{ padding: '2px 6px', fontSize: 11 }}
+                value={project.programId || ''}
+                onChange={(e) => actions.updateProject(project.id, { programId: e.target.value || null })}
+              >
+                <option value="">No program</option>
+                {(state.programs || []).map((pg) => (
+                  <option key={pg.id} value={pg.id}>{pg.name}</option>
+                ))}
+              </select>
+            )}
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
               {fmtDate(project.startDate)} → {fmtDate(project.dueDate)}
             </span>
