@@ -1,5 +1,5 @@
-// Seed data for a realistic solo-operator portfolio.
-// Dates are relative to "today" so the seed always feels current.
+// Demo seed data — 3 programs, 7 projects, one deep dependency violation.
+// Dates are relative so the seed always feels current.
 
 const today = new Date();
 const d = (offset) => {
@@ -9,347 +9,280 @@ const d = (offset) => {
 };
 
 const SEED = {
-  version: 10,
+  version: 1,
   meta: {
     theme: 'dark',
     density: 'compact',
     accent: 'amber',
     monoIds: true,
-    activeView: 'portfolio',
-    activeProjectId: 'p-atlas',
-    lastWeeklyReview: d(-6),
+    activeView: 'roadmap',
+    activeProjectId: 'p-1-1',
+    activeProgramId: null,
+    lastWeeklyReview: d(-5),
     lastPlanDate: null,
-    plannedToday: [],
+    plannedToday: ['t-3', 't-7'],
     yesterdayShipped: [],
     riskFields: ['category', 'response'],
+    nextTaskId: 30,
+    nextNoteId: 20,
+    nextRiskId: 10,
     integrations: {
-      jira: { connected: true, site: 'acme.atlassian.net', user: 'you@acme.co', syncedAt: d(0) },
-      confluence: { connected: true, site: 'acme.atlassian.net', user: 'you@acme.co', syncedAt: d(0) },
+      jira: { connected: false },
+      confluence: { connected: false },
     },
   },
-  projects: [
+
+  programs: [
     {
-      id: 'p-atlas',
-      code: 'ATLAS',
-      name: 'Atlas — Product relaunch',
-      color: 'amber',
-      priority: 'critical',
-      status: 'on-track',
-      owner: 'You',
-      objective: 'Ship v2 of Atlas with new positioning and pricing by end of Q2.',
-      successCriteria: [
-        { id: 'sc-1', text: '30% uplift in landing → trial conversion', target: '30%', current: '18%' },
-        { id: 'sc-2', text: 'Pricing page CTR > 12%', target: '12%', current: '9.4%' },
-        { id: 'sc-3', text: 'NPS among trial users ≥ 40', target: '40', current: '—' },
-      ],
-      startDate: d(-42),
-      dueDate: d(38),
-      createdAt: d(-42),
-    },
-    {
-      id: 'p-helios',
-      code: 'HELIOS',
-      name: 'Helios — Fundraise prep',
-      color: 'rose',
-      priority: 'critical',
-      status: 'at-risk',
-      owner: 'You',
-      objective: 'Close Series A bridge round of $2.5M by July.',
-      successCriteria: [
-        { id: 'sc-1', text: 'Term sheet signed', target: '1', current: '0' },
-        { id: 'sc-2', text: 'Data room complete', target: '100%', current: '72%' },
-      ],
-      startDate: d(-28),
-      dueDate: d(52),
-      createdAt: d(-28),
-    },
-    {
-      id: 'p-orbit',
-      code: 'ORBIT',
-      name: 'Orbit — Customer research',
-      color: 'sky',
-      priority: 'high',
-      status: 'on-track',
-      owner: 'You',
-      objective: 'Interview 20 power users and publish a synthesis doc informing roadmap.',
-      successCriteria: [
-        { id: 'sc-1', text: '20 interviews completed', target: '20', current: '14' },
-        { id: 'sc-2', text: 'Synthesis doc shipped', target: '1', current: '0' },
-      ],
-      startDate: d(-21),
-      dueDate: d(14),
-      createdAt: d(-21),
-    },
-    {
-      id: 'p-vega',
-      code: 'VEGA',
-      name: 'Vega — Internal ops cleanup',
-      color: 'violet',
-      priority: 'medium',
-      status: 'blocked',
-      owner: 'You',
-      objective: 'Consolidate finance + CRM tooling; reduce monthly ops time by 50%.',
-      successCriteria: [
-        { id: 'sc-1', text: 'Monthly ops time < 6 hrs', target: '6h', current: '12h' },
-      ],
-      startDate: d(-60),
-      dueDate: d(25),
+      id: 'pg-1', name: 'P1. Product Launch',
+      description: 'End-to-end launch of the 2.0 product line — website, pricing, and growth',
+      deliverable: 'Live product site, published pricing tiers, onboarding conversion ≥ 40%',
       createdAt: d(-60),
     },
     {
-      id: 'p-nova',
-      code: 'NOVA',
-      name: 'Nova — Q3 planning',
-      color: 'emerald',
-      priority: 'medium',
-      status: 'on-track',
-      owner: 'You',
-      objective: 'Draft Q3 plan with three bets, metrics, and resourcing.',
+      id: 'pg-2', name: 'P2. Platform Foundation',
+      description: 'Core infrastructure upgrades to support scale — API, auth, and analytics',
+      deliverable: 'API v2 GA, RBAC in prod, real-time analytics pipeline processing 10k events/day',
+      createdAt: d(-60),
+    },
+    {
+      id: 'pg-3', name: 'P3. Customer Growth',
+      description: 'Post-launch customer success and retention — onboarding flow and help content',
+      deliverable: 'Onboarding completion rate ≥ 70%, Help Center live with 50+ articles',
+      createdAt: d(-60),
+    },
+  ],
+
+  projects: [
+    // ── P1 Product Launch ──────────────────────────────────────────────────────
+    {
+      id: 'p-1-1', programId: 'pg-1', code: '1.1',
+      name: 'Project 1.1 — Marketing Site Redesign',
+      objective: 'Redesign and launch the marketing site for the 2.0 product line',
+      description: 'Full redesign of homepage, pricing, and feature pages to reflect new product positioning. Must be live before onboarding flow goes out.',
+      deliverable: 'New marketing site live at production URL with 2.0 branding and updated pricing pages',
+      status: 'on-track', priority: 'critical', color: 'emerald',
+      owner: 'Delaney', team: ['Delaney', 'Alex', 'Sam'],
+      startDate: d(-30), dueDate: d(30),
       successCriteria: [
-        { id: 'sc-1', text: 'Plan reviewed with advisors', target: '3', current: '1' },
+        { id: 'sc-1-1-1', text: 'Core Web Vitals all green', current: 'Yellow', target: 'Green' },
+        { id: 'sc-1-1-2', text: 'Conversion rate on pricing page', current: '2.1%', target: '≥ 4%' },
       ],
-      startDate: d(-7),
-      dueDate: d(21),
-      createdAt: d(-7),
+      createdAt: d(-30),
+    },
+    {
+      id: 'p-1-2', programId: 'pg-1', code: '1.2',
+      name: 'Project 1.2 — Pricing & Packaging',
+      objective: 'Define and publish final pricing tiers and packaging for the 2.0 launch',
+      description: 'Research competitive pricing, model unit economics, get leadership sign-off, and publish to site. Blocked on advisor review.',
+      deliverable: 'Published pricing page with 3 tiers, internal unit economics model approved by CFO',
+      status: 'at-risk', priority: 'high', color: 'amber',
+      owner: 'Delaney', team: ['Delaney', 'Jordan'],
+      startDate: d(-10), dueDate: d(45),
+      successCriteria: [
+        { id: 'sc-1-2-1', text: 'Pricing page published before launch', current: 'Not started', target: 'Live' },
+      ],
+      createdAt: d(-10),
+    },
+
+    // ── P2 Platform Foundation ─────────────────────────────────────────────────
+    {
+      id: 'p-2-1', programId: 'pg-2', code: '2.1',
+      name: 'Project 2.1 — API v2',
+      objective: 'Ship a versioned, backward-compatible API v2 with REST and GraphQL endpoints',
+      description: 'Refactor the existing API layer to support versioning, add rate limiting, write OpenAPI docs, and run a 2-week beta with partners.',
+      deliverable: 'API v2 GA with OpenAPI spec published, 99.9% uptime SLA in prod for 2 consecutive weeks',
+      status: 'on-track', priority: 'critical', color: 'sky',
+      owner: 'Alex', team: ['Alex', 'Morgan'],
+      startDate: d(-45), dueDate: d(60),
+      successCriteria: [
+        { id: 'sc-2-1-1', text: 'Beta partner coverage', current: '3 partners', target: '≥ 5 partners' },
+        { id: 'sc-2-1-2', text: 'API uptime in beta', current: '99.4%', target: '≥ 99.9%' },
+      ],
+      createdAt: d(-45),
+    },
+    {
+      id: 'p-2-2', programId: 'pg-2', code: '2.2',
+      name: 'Project 2.2 — Auth & Permissions',
+      objective: 'Implement RBAC (role-based access control) on top of the new API v2 auth layer',
+      description: 'Design and ship RBAC for enterprise accounts. Blocked on API v2 auth merge — cannot start RBAC schema work until the new auth primitives are in main.',
+      deliverable: 'RBAC live in prod: org/team/user roles, permission matrix documented, enterprise admin console shipped',
+      status: 'blocked', priority: 'high', color: 'rose',
+      owner: 'Morgan', team: ['Morgan', 'Alex'],
+      startDate: d(-20), dueDate: d(75),
+      dependsOn: ['p-2-1'],
+      successCriteria: [
+        { id: 'sc-2-2-1', text: 'Enterprise accounts migrated to RBAC', current: '0/12', target: '12/12' },
+      ],
+      createdAt: d(-20),
+    },
+    {
+      id: 'p-2-3', programId: 'pg-2', code: '2.3',
+      name: 'Project 2.3 — Analytics Pipeline',
+      objective: 'Build a real-time event ingestion and analytics pipeline for product telemetry',
+      description: 'Stream product events via Kafka, store in ClickHouse, expose metrics dashboard to internal teams.',
+      deliverable: 'Pipeline processing ≥ 10k events/day with < 2s latency, internal dashboard live',
+      status: 'on-track', priority: 'medium', color: 'violet',
+      owner: 'Sam', team: ['Sam'],
+      startDate: d(-15), dueDate: d(50),
+      successCriteria: [
+        { id: 'sc-2-3-1', text: 'Events/day throughput', current: '2k', target: '≥ 10k' },
+        { id: 'sc-2-3-2', text: 'Pipeline latency p99', current: '8s', target: '< 2s' },
+      ],
+      createdAt: d(-15),
+    },
+
+    // ── P3 Customer Growth ─────────────────────────────────────────────────────
+    {
+      id: 'p-3-1', programId: 'pg-3', code: '3.1',
+      name: 'Project 3.1 — Customer Onboarding Flow',
+      objective: 'Build a guided in-app onboarding flow for new customers post-launch',
+      description: 'Design and ship a 5-step onboarding checklist tied to the new auth/permissions model. Requires Auth & Permissions (2.2) to be live before we can build permission-gated onboarding steps.',
+      deliverable: 'In-app onboarding flow live, ≥ 70% completion rate in first 30 days post-launch',
+      // ⚠ DEEP VIOLATION: due d+55, but depends on p-2-2 which is due d+75
+      status: 'at-risk', priority: 'high', color: 'amber',
+      owner: 'Jordan', team: ['Jordan', 'Delaney'],
+      startDate: d(20), dueDate: d(55),
+      dependsOn: ['p-1-1', 'p-2-2'],
+      successCriteria: [
+        { id: 'sc-3-1-1', text: 'Onboarding completion rate', current: 'N/A', target: '≥ 70%' },
+      ],
+      createdAt: d(-5),
+    },
+    {
+      id: 'p-3-2', programId: 'pg-3', code: '3.2',
+      name: 'Project 3.2 — Help Center',
+      objective: 'Launch a public Help Center with 50+ articles before product launch',
+      description: 'Write and publish product docs, FAQs, and video walkthroughs. Independent of other projects.',
+      deliverable: 'Help Center live at help.example.com with ≥ 50 published articles',
+      status: 'on-track', priority: 'medium', color: 'emerald',
+      owner: 'Sam', team: ['Sam', 'Jordan'],
+      startDate: d(0), dueDate: d(40),
+      successCriteria: [
+        { id: 'sc-3-2-1', text: 'Articles published', current: '12', target: '≥ 50' },
+      ],
+      createdAt: d(0),
     },
   ],
+
   milestones: [
-    // ATLAS
-    { id: 'm-a1', projectId: 'p-atlas', title: 'Positioning narrative locked', date: d(-14), status: 'done', deliverable: 'Narrative doc v3' },
-    { id: 'm-a2', projectId: 'p-atlas', title: 'Pricing page live', date: d(-3), status: 'done', deliverable: 'Landing + /pricing' },
-    { id: 'm-a3', projectId: 'p-atlas', title: 'Private beta opens', date: d(10), status: 'in-progress', deliverable: '50 invites sent' },
-    { id: 'm-a4', projectId: 'p-atlas', title: 'Public launch', date: d(38), status: 'planned', deliverable: 'Launch day assets' },
-    // HELIOS
-    { id: 'm-h1', projectId: 'p-helios', title: 'Data room v1', date: d(-10), status: 'done', deliverable: 'DR folder shared' },
-    { id: 'm-h2', projectId: 'p-helios', title: 'Deck final', date: d(4), status: 'in-progress', deliverable: 'PDF + narrative' },
-    { id: 'm-h3', projectId: 'p-helios', title: 'First meetings', date: d(12), status: 'planned', deliverable: '8 intros booked' },
-    { id: 'm-h4', projectId: 'p-helios', title: 'Term sheet', date: d(52), status: 'planned', deliverable: 'Signed TS' },
-    // ORBIT
-    { id: 'm-o1', projectId: 'p-orbit', title: 'Interview guide', date: d(-18), status: 'done', deliverable: 'Guide v2' },
-    { id: 'm-o2', projectId: 'p-orbit', title: '20 interviews complete', date: d(7), status: 'in-progress', deliverable: 'All transcripts' },
-    { id: 'm-o3', projectId: 'p-orbit', title: 'Synthesis published', date: d(14), status: 'planned', deliverable: 'Doc + summary deck' },
-    // VEGA
-    { id: 'm-v1', projectId: 'p-vega', title: 'Tooling audit', date: d(-40), status: 'done', deliverable: 'Audit spreadsheet' },
-    { id: 'm-v2', projectId: 'p-vega', title: 'Vendor selected', date: d(-7), status: 'blocked', deliverable: 'Contract' },
-    { id: 'm-v3', projectId: 'p-vega', title: 'Migration complete', date: d(25), status: 'planned', deliverable: 'All data moved' },
-    // NOVA
-    { id: 'm-n1', projectId: 'p-nova', title: 'Bets drafted', date: d(3), status: 'in-progress', deliverable: '3 bet memos' },
-    { id: 'm-n2', projectId: 'p-nova', title: 'Advisor review', date: d(14), status: 'planned', deliverable: 'Meeting notes' },
-    { id: 'm-n3', projectId: 'p-nova', title: 'Plan published', date: d(21), status: 'planned', deliverable: 'Q3 plan doc' },
+    // p-1-1 Marketing Site Redesign
+    { id: 'm-1-1-1', projectId: 'p-1-1', name: 'Design system finalized', description: 'Typography, color tokens, and component library locked', deliverable: 'Figma file approved by design lead', date: d(-10), status: 'done' },
+    { id: 'm-1-1-2', projectId: 'p-1-1', name: 'Homepage shipped to staging', description: 'Fully interactive homepage in staging environment', deliverable: 'Staging URL shared with stakeholders for review', date: d(5), status: 'planned' },
+    { id: 'm-1-1-3', projectId: 'p-1-1', name: 'Pricing page live', description: 'Pricing page live with final copy and tier breakdown', deliverable: 'Pricing page at /pricing in production', date: d(20), status: 'planned' },
+    { id: 'm-1-1-4', projectId: 'p-1-1', name: 'Full site launch', description: 'All pages live, redirects in place, analytics wired', deliverable: 'Site live with zero broken links, Segment tracking verified', date: d(30), status: 'planned' },
+
+    // p-1-2 Pricing & Packaging
+    { id: 'm-1-2-1', projectId: 'p-1-2', name: 'Competitive analysis complete', description: 'Benchmark pricing against 5 competitors, model 3 scenarios', deliverable: 'Pricing research doc shared with leadership', date: d(-5), status: 'done' },
+    { id: 'm-1-2-2', projectId: 'p-1-2', name: 'Advisor review', description: 'Pricing model reviewed by external advisor before CFO sign-off', deliverable: 'Advisor sign-off email on record', date: d(15), status: 'planned' },
+    { id: 'm-1-2-3', projectId: 'p-1-2', name: 'CFO sign-off', description: 'Final pricing tiers approved by CFO', deliverable: 'Signed-off pricing deck', date: d(35), status: 'planned' },
+    { id: 'm-1-2-4', projectId: 'p-1-2', name: 'Pricing page published', description: 'Final pricing live on marketing site', deliverable: 'Pricing page at /pricing with correct tier data', date: d(45), status: 'planned' },
+
+    // p-2-1 API v2
+    { id: 'm-2-1-1', projectId: 'p-2-1', name: 'API versioning design approved', description: 'URL versioning strategy and breaking change policy documented', deliverable: 'Architecture doc with team sign-off', date: d(-30), status: 'done' },
+    { id: 'm-2-1-2', projectId: 'p-2-1', name: 'REST endpoints complete', description: 'All REST endpoints for v2 migrated and tested', deliverable: 'Passing integration test suite for all v2 REST routes', date: d(-5), status: 'done' },
+    { id: 'm-2-1-3', projectId: 'p-2-1', name: 'Beta partner onboarding', description: 'First 5 beta partners integrated on API v2', deliverable: 'Signed beta agreement from 5 partners, integration confirmed', date: d(20), status: 'planned' },
+    { id: 'm-2-1-4', projectId: 'p-2-1', name: 'API v2 GA release', description: 'General availability with full OpenAPI docs published', deliverable: 'OpenAPI spec at /docs/v2, blog post published, deprecation notice sent to v1 users', date: d(60), status: 'planned' },
+
+    // p-2-2 Auth & Permissions
+    { id: 'm-2-2-1', projectId: 'p-2-2', name: 'RBAC schema design', description: 'Role and permission schema designed and reviewed', deliverable: 'DB migration scripts + schema docs reviewed by security', date: d(10), status: 'planned' },
+    { id: 'm-2-2-2', projectId: 'p-2-2', name: 'API auth layer merged', description: 'New auth primitives from API v2 merged into main', deliverable: 'PR merged, all tests green, deployed to staging', date: d(25), status: 'planned' },
+    { id: 'm-2-2-3', projectId: 'p-2-2', name: 'Admin console shipped', description: 'Enterprise admin console for managing org/team/user roles', deliverable: 'Admin console accessible to org admins in production', date: d(55), status: 'planned' },
+    { id: 'm-2-2-4', projectId: 'p-2-2', name: 'RBAC GA + migration complete', description: 'All 12 enterprise accounts migrated to RBAC', deliverable: '12/12 enterprise accounts on RBAC, migration guide published', date: d(75), status: 'planned' },
+
+    // p-2-3 Analytics Pipeline
+    { id: 'm-2-3-1', projectId: 'p-2-3', name: 'Kafka topic schema locked', description: 'Event schema finalized and documented', deliverable: 'Avro schema published to schema registry', date: d(-5), status: 'done' },
+    { id: 'm-2-3-2', projectId: 'p-2-3', name: 'ClickHouse cluster live', description: 'ClickHouse cluster provisioned and ingesting events', deliverable: 'Cluster running with backfill of 7 days of historical events', date: d(15), status: 'planned' },
+    { id: 'm-2-3-3', projectId: 'p-2-3', name: 'Internal dashboard live', description: 'Product metrics dashboard available to internal team', deliverable: 'Dashboard at metrics.internal with ≥ 5 key charts', date: d(35), status: 'planned' },
+    { id: 'm-2-3-4', projectId: 'p-2-3', name: 'Pipeline at throughput target', description: 'Pipeline consistently processing ≥ 10k events/day at < 2s latency', deliverable: 'Grafana dashboard showing ≥ 10k/day for 5 consecutive days', date: d(50), status: 'planned' },
+
+    // p-3-1 Customer Onboarding (⚠ due d+55, dep p-2-2 done d+75 = VIOLATION)
+    { id: 'm-3-1-1', projectId: 'p-3-1', name: 'Onboarding flow design', description: '5-step onboarding checklist wireframed and approved', deliverable: 'Figma prototype approved by PM and design lead', date: d(22), status: 'planned' },
+    { id: 'm-3-1-2', projectId: 'p-3-1', name: 'Permission-gated steps wired', description: 'Onboarding steps that check user permissions connected to RBAC API', deliverable: 'All 5 steps functional in staging with real RBAC checks', date: d(40), status: 'planned' },
+    { id: 'm-3-1-3', projectId: 'p-3-1', name: 'Onboarding flow live', description: 'Full onboarding flow live for new signups post-launch', deliverable: 'Flow live in production, completion tracking in Amplitude', date: d(55), status: 'planned' },
+
+    // p-3-2 Help Center
+    { id: 'm-3-2-1', projectId: 'p-3-2', name: '25 articles published', description: 'First batch of help articles covering core features', deliverable: '25 articles live at help.example.com', date: d(15), status: 'planned' },
+    { id: 'm-3-2-2', projectId: 'p-3-2', name: 'Help Center launch', description: '50+ articles live with search and navigation', deliverable: 'Help Center at help.example.com, linked from marketing site', date: d(40), status: 'planned' },
   ],
+
   tasks: [
-    // ATLAS tasks
-    { id: 't-1', projectId: 'p-atlas', objectiveId: 'sc-1', title: 'Rewrite hero copy with new positioning', status: 'in-progress', priority: 'P0', rank: 1, dueDate: d(0), blockers: [], dependsOn: ['t-7'], pinned: true, createdAt: d(-3), updatedAt: d(0), estimate: 2, source: 'planned' },
-    { id: 't-2', projectId: 'p-atlas', objectiveId: 'sc-2', title: 'A/B test pricing CTA variants', status: 'todo', priority: 'P0', rank: 2, dueDate: d(2), blockers: [], createdAt: d(-5), updatedAt: d(-1), estimate: 3, source: 'planned' },
-    { id: 't-3', projectId: 'p-atlas', objectiveId: 'sc-1', title: 'Fix broken analytics events on /trial', status: 'todo', priority: 'P1', rank: 1, dueDate: d(1), blockers: [], createdAt: d(-1), updatedAt: d(-1), estimate: 1, source: 'reactive' },
-    { id: 't-4', projectId: 'p-atlas', objectiveId: 'sc-3', title: 'Draft beta welcome email sequence', status: 'todo', priority: 'P1', rank: 2, dueDate: d(4), blockers: [], dependsOn: ['t-3'], createdAt: d(-2), updatedAt: d(-2), estimate: 2, source: 'planned' },
-    { id: 't-5', projectId: 'p-atlas', objectiveId: 'sc-1', title: 'Record product walkthrough video', status: 'todo', priority: 'P2', rank: 1, dueDate: d(7), blockers: [], createdAt: d(-2), updatedAt: d(-2), estimate: 3, source: 'planned' },
-    { id: 't-6', projectId: 'p-atlas', objectiveId: 'sc-2', title: 'Legal review of pricing tiers', status: 'done', priority: 'P1', rank: 3, dueDate: d(-2), blockers: [], createdAt: d(-8), updatedAt: d(-2), completedAt: d(-2), estimate: 1, source: 'planned' },
-    { id: 't-7', projectId: 'p-atlas', objectiveId: 'sc-1', title: 'Finalize positioning doc', status: 'done', priority: 'P0', rank: 4, dueDate: d(-14), blockers: [], createdAt: d(-20), updatedAt: d(-14), completedAt: d(-14), estimate: 5, source: 'planned' },
+    // p-1-1 Marketing Site Redesign
+    { id: 't-1',  projectId: 'p-1-1', title: 'Write homepage hero copy',              status: 'done',        priority: 'critical', rank: 1, estimate: 2, createdAt: d(-20), updatedAt: d(-8), completedAt: d(-8) },
+    { id: 't-2',  projectId: 'p-1-1', title: 'Build responsive nav component',        status: 'in-progress', priority: 'high',     rank: 2, estimate: 3, createdAt: d(-15), updatedAt: d(-1) },
+    { id: 't-3',  projectId: 'p-1-1', title: 'Set up Segment analytics on all pages', status: 'todo',        priority: 'high',     rank: 3, estimate: 2, dueDate: d(5),  createdAt: d(-5), updatedAt: d(-5) },
+    { id: 't-4',  projectId: 'p-1-1', title: 'Optimize images for Core Web Vitals',   status: 'todo',        priority: 'medium',   rank: 4, estimate: 3, createdAt: d(-5), updatedAt: d(-5) },
 
-    // HELIOS tasks
-    { id: 't-10', projectId: 'p-helios', objectiveId: 'sc-2', title: 'Finish financial model v4', status: 'in-progress', priority: 'P0', rank: 1, dueDate: d(-1), blockers: [], pinned: true, createdAt: d(-6), updatedAt: d(0), estimate: 4, source: 'planned' },
-    { id: 't-11', projectId: 'p-helios', objectiveId: 'sc-2', title: 'Upload cap table to data room', status: 'todo', priority: 'P0', rank: 2, dueDate: d(0), blockers: ['bl-1'], createdAt: d(-3), updatedAt: d(-1), estimate: 1, source: 'planned' },
-    { id: 't-12', projectId: 'p-helios', objectiveId: 'sc-1', title: 'Draft intro email templates', status: 'todo', priority: 'P1', rank: 1, dueDate: d(3), blockers: [], createdAt: d(-2), updatedAt: d(-2), estimate: 1, source: 'planned' },
-    { id: 't-13', projectId: 'p-helios', objectiveId: 'sc-1', title: 'Prep Q&A doc for investor calls', status: 'todo', priority: 'P1', rank: 2, dueDate: d(5), blockers: [], dependsOn: ['t-14'], createdAt: d(-2), updatedAt: d(-2), estimate: 3, source: 'planned' },
-    { id: 't-14', projectId: 'p-helios', objectiveId: 'sc-2', title: 'Deck: narrative pass with advisor', status: 'in-progress', priority: 'P0', rank: 3, dueDate: d(1), blockers: [], createdAt: d(-4), updatedAt: d(0), estimate: 2, source: 'planned' },
+    // p-1-2 Pricing & Packaging
+    { id: 't-5',  projectId: 'p-1-2', title: 'Draft pricing tiers doc',               status: 'done',        priority: 'high',     rank: 1, estimate: 4, createdAt: d(-8), updatedAt: d(-3), completedAt: d(-3) },
+    { id: 't-6',  projectId: 'p-1-2', title: 'Schedule advisor meeting',              status: 'todo',        priority: 'high',     rank: 2, estimate: 1, dueDate: d(3),  createdAt: d(-2), updatedAt: d(-2), blockers: ['bl-1'] },
+    { id: 't-7',  projectId: 'p-1-2', title: 'Build unit economics model',            status: 'todo',        priority: 'medium',   rank: 3, estimate: 6, dueDate: d(10), createdAt: d(-2), updatedAt: d(-2) },
 
-    // ORBIT tasks
-    { id: 't-20', projectId: 'p-orbit', objectiveId: 'sc-1', title: 'Schedule remaining 6 interviews', status: 'in-progress', priority: 'P0', rank: 1, dueDate: d(2), blockers: [], createdAt: d(-4), updatedAt: d(0), estimate: 2, source: 'planned' },
-    { id: 't-21', projectId: 'p-orbit', objectiveId: 'sc-1', title: 'Transcribe last 4 interviews', status: 'todo', priority: 'P1', rank: 1, dueDate: d(4), blockers: [], createdAt: d(-2), updatedAt: d(-2), estimate: 2, source: 'planned' },
-    { id: 't-22', projectId: 'p-orbit', objectiveId: 'sc-2', title: 'Code themes across 14 transcripts', status: 'todo', priority: 'P0', rank: 2, dueDate: d(6), blockers: [], dependsOn: ['t-21'], createdAt: d(-2), updatedAt: d(-2), estimate: 4, source: 'planned' },
-    { id: 't-23', projectId: 'p-orbit', objectiveId: 'sc-2', title: 'Draft synthesis outline', status: 'todo', priority: 'P1', rank: 2, dueDate: d(8), blockers: [], dependsOn: ['t-22'], createdAt: d(-1), updatedAt: d(-1), estimate: 2, source: 'planned' },
+    // p-2-1 API v2
+    { id: 't-8',  projectId: 'p-2-1', title: 'Migrate /users endpoints to v2',        status: 'done',        priority: 'critical', rank: 1, estimate: 5, createdAt: d(-30), updatedAt: d(-10), completedAt: d(-10) },
+    { id: 't-9',  projectId: 'p-2-1', title: 'Add rate limiting middleware',           status: 'done',        priority: 'high',     rank: 2, estimate: 3, createdAt: d(-20), updatedAt: d(-6), completedAt: d(-6) },
+    { id: 't-10', projectId: 'p-2-1', title: 'Write OpenAPI spec for v2',             status: 'in-progress', priority: 'high',     rank: 3, estimate: 8, createdAt: d(-10), updatedAt: d(-1) },
+    { id: 't-11', projectId: 'p-2-1', title: 'Onboard first 3 beta partners',         status: 'todo',        priority: 'high',     rank: 4, estimate: 4, dueDate: d(20), createdAt: d(-5), updatedAt: d(-5) },
 
-    // VEGA tasks
-    { id: 't-30', projectId: 'p-vega', objectiveId: 'sc-1', title: 'Chase Acme contract redlines', status: 'blocked', priority: 'P0', rank: 1, dueDate: d(-4), blockers: ['bl-2'], createdAt: d(-12), updatedAt: d(-4), estimate: 1, source: 'reactive' },
-    { id: 't-31', projectId: 'p-vega', objectiveId: 'sc-1', title: 'Export CRM data for migration', status: 'todo', priority: 'P1', rank: 1, dueDate: d(10), blockers: ['bl-2'], dependsOn: ['t-30'], createdAt: d(-10), updatedAt: d(-10), estimate: 2, source: 'planned' },
-    { id: 't-32', projectId: 'p-vega', objectiveId: 'sc-1', title: 'Write SOP for monthly close', status: 'todo', priority: 'P2', rank: 1, dueDate: d(18), blockers: [], createdAt: d(-8), updatedAt: d(-8), estimate: 2, source: 'planned' },
+    // p-2-2 Auth & Permissions (blocked)
+    { id: 't-12', projectId: 'p-2-2', title: 'Design RBAC schema',                   status: 'blocked',     priority: 'critical', rank: 1, estimate: 8, blockers: ['bl-2'], createdAt: d(-15), updatedAt: d(-1) },
+    { id: 't-13', projectId: 'p-2-2', title: 'Write RBAC API spec',                  status: 'todo',        priority: 'high',     rank: 2, estimate: 5, createdAt: d(-10), updatedAt: d(-10) },
 
-    // NOVA tasks
-    { id: 't-40', projectId: 'p-nova', objectiveId: 'sc-1', title: 'Bet #1 memo: distribution', status: 'in-progress', priority: 'P1', rank: 1, dueDate: d(2), blockers: [], createdAt: d(-4), updatedAt: d(0), estimate: 3, source: 'planned' },
-    { id: 't-41', projectId: 'p-nova', objectiveId: 'sc-1', title: 'Bet #2 memo: platform', status: 'todo', priority: 'P1', rank: 2, dueDate: d(4), blockers: [], createdAt: d(-3), updatedAt: d(-3), estimate: 3, source: 'planned' },
-    { id: 't-42', projectId: 'p-nova', objectiveId: 'sc-1', title: 'Bet #3 memo: monetization', status: 'todo', priority: 'P2', rank: 1, dueDate: d(6), blockers: [], createdAt: d(-2), updatedAt: d(-2), estimate: 3, source: 'planned' },
+    // p-2-3 Analytics Pipeline
+    { id: 't-14', projectId: 'p-2-3', title: 'Provision ClickHouse cluster on AWS',  status: 'in-progress', priority: 'critical', rank: 1, estimate: 4, createdAt: d(-10), updatedAt: d(-1) },
+    { id: 't-15', projectId: 'p-2-3', title: 'Write Kafka consumer for product events', status: 'todo',      priority: 'high',     rank: 2, estimate: 6, createdAt: d(-8), updatedAt: d(-8) },
+    { id: 't-16', projectId: 'p-2-3', title: 'Build first 5 Grafana charts',         status: 'todo',        priority: 'medium',   rank: 3, estimate: 4, createdAt: d(-5), updatedAt: d(-5) },
+
+    // p-3-1 Onboarding
+    { id: 't-17', projectId: 'p-3-1', title: 'Draft onboarding checklist steps',     status: 'todo',        priority: 'high',     rank: 1, estimate: 3, createdAt: d(-3), updatedAt: d(-3) },
+    { id: 't-18', projectId: 'p-3-1', title: 'Design onboarding UI in Figma',        status: 'todo',        priority: 'high',     rank: 2, estimate: 5, createdAt: d(-3), updatedAt: d(-3) },
+
+    // p-3-2 Help Center
+    { id: 't-19', projectId: 'p-3-2', title: 'Write Getting Started guide',          status: 'in-progress', priority: 'high',     rank: 1, estimate: 4, createdAt: d(-7), updatedAt: d(-1) },
+    { id: 't-20', projectId: 'p-3-2', title: 'Set up Zendesk Help Center',           status: 'done',        priority: 'high',     rank: 2, estimate: 2, createdAt: d(-10), updatedAt: d(-5), completedAt: d(-5) },
   ],
-  blockers: [
-    { id: 'bl-1', taskId: 't-11', description: 'Waiting on counsel to return clean cap table', waitingOn: 'Sasha (legal)', since: d(-3), kind: 'blocker' },
-    { id: 'bl-2', taskId: 't-30', description: 'Vendor silent on redlines for 9 days', waitingOn: 'Acme Vendor', since: d(-9), kind: 'blocker' },
-    { id: 'bl-3', taskId: 't-12', description: 'Intro email list approval', waitingOn: 'Advisor Priya C.', since: d(-2), kind: 'waiting' },
-    { id: 'bl-4', taskId: 't-40', description: 'Distribution data from growth', waitingOn: 'Dev Bhatt', since: d(-4), kind: 'waiting' },
-  ],
+
   notes: [
-    // ATLAS
-    { id: 'n-1', projectId: 'p-atlas', kind: 'decision', title: 'Keep free tier, remove team tier', body: 'After pricing research, consolidated to Free / Pro / Enterprise. Team tier cannibalized Pro.', date: d(-8), tags: ['pricing'], context: 'Three tier structures tested with 12 prospects. Team tier was explainable but nobody picked it over Pro.', options: 'A) Keep all 4 tiers. B) Drop team. C) Drop enterprise and sell custom.', reversibility: 'reversible', pinned: true },
-    { id: 'n-2', projectId: 'p-atlas', kind: 'decision', title: 'Ship landing before beta', body: 'Trade-off: landing pushes beta by 1 week but compounds top-of-funnel.', date: d(-15), tags: ['sequencing'], context: 'Beta ready but landing v2 lagging. Launching beta on v1 landing would bleed trials.', options: 'A) Ship both together (delay beta). B) Ship beta now, landing later. C) Ship beta as invite-only and wait on landing.', reversibility: 'reversible' },
-    { id: 'n-3', projectId: 'p-atlas', kind: 'question', title: 'Do we need SOC2 for launch?', body: 'Two enterprise prospects asked. Unknown if gating. Check with 3 more.', date: d(-2), tags: ['enterprise', 'compliance'] },
-    { id: 'n-4', projectId: 'p-atlas', kind: 'artifact', title: 'Positioning doc v3', body: 'Notion link', date: d(-14), tags: ['doc'] },
+    // Decisions
+    { id: 'n-1', kind: 'decision', projectId: 'p-1-1', title: 'Use Next.js for marketing site', body: 'Chose Next.js over Webflow for easier A/B testing integration and dev control over performance.', date: d(-28), tags: ['tech', 'architecture'] },
+    { id: 'n-2', kind: 'decision', projectId: 'p-2-1', title: 'URL-based versioning for API (not header)', body: 'Header versioning was considered but rejected — URL versioning is simpler for partners to test and debug. Decision confirmed with 3 beta partners.', date: d(-35), tags: ['api', 'architecture'] },
+    { id: 'n-3', kind: 'decision', projectId: 'p-2-2', title: 'Block RBAC on API v2 auth merge', body: 'Auth & Permissions cannot start schema work until API v2 new auth primitives are merged. Avoids two incompatible auth systems running in parallel.', date: d(-18), tags: ['dependency', 'risk'] },
+    { id: 'n-4', kind: 'decision', projectId: 'p-2-3', title: 'ClickHouse over BigQuery for pipeline', body: 'ClickHouse chosen for sub-second query latency on columnar data. BigQuery costs were 4x higher at projected scale.', date: d(-14), tags: ['tech', 'architecture'] },
+    { id: 'n-5', kind: 'decision', projectId: 'p-3-1', title: 'Defer onboarding launch until RBAC is live', body: 'Permission-gated onboarding steps require RBAC in prod. Launch date set to d+55, but Auth (2.2) is not due until d+75. This creates a timeline conflict that needs resolution.', date: d(-4), tags: ['risk', 'dependency'] },
 
-    // HELIOS
-    { id: 'n-10', projectId: 'p-helios', kind: 'decision', title: 'Target bridge over priced round', body: 'Faster, less dilution at current metrics. Revisit in 6 months.', date: d(-21), tags: ['strategy'], context: 'Runway 7 months. Metrics improving but not yet top-quartile. Priced round likely forces down-round markdown.', options: 'A) Priced Series A at $18-22 pre. B) SAFE bridge at $28 cap. C) Revenue-based financing.', reversibility: 'irreversible', pinned: true },
-    { id: 'n-11', projectId: 'p-helios', kind: 'question', title: 'What valuation anchors do we give?', body: 'Advisor says start at 28; floor 22. Need 3 more data points.', date: d(-5), tags: ['negotiation'] },
-    { id: 'n-12', projectId: 'p-helios', kind: 'artifact', title: 'Data room v1 link', body: 'Drive folder — shared read-only.', date: d(-10), tags: ['dataroom'] },
-
-    // ORBIT
-    { id: 'n-20', projectId: 'p-orbit', kind: 'decision', title: 'Interview only power users (>20hrs/wk)', body: 'Skipping casual users keeps signal density high.', date: d(-18), tags: ['scoping'], context: 'Waitlist mixed power + casual. Time-boxed to 20 interviews.', options: 'A) Balanced sample. B) Power-user only. C) Stratified by company size.', reversibility: 'reversible' },
-    { id: 'n-21', projectId: 'p-orbit', kind: 'question', title: 'Emerging theme: workflow handoffs', body: '8/14 mention breakage at handoff. Worth a dedicated interview pass?', date: d(-3), tags: ['insight'] },
-
-    // VEGA
-    { id: 'n-30', projectId: 'p-vega', kind: 'decision', title: 'Consolidate on Ramp + Attio', body: 'Drop 3 other tools. Savings: $410/mo.', date: d(-30), tags: ['tooling'], context: 'Five overlapping tools. Ramp + Attio cover 90% of use.', options: 'A) Status quo. B) Consolidate to Ramp + Attio. C) Build internal.', reversibility: 'reversible' },
-
-    // NOVA
-    { id: 'n-40', projectId: 'p-nova', kind: 'question', title: 'Bet sizing — 60/30/10 or equal?', body: 'Lean toward weighted. Ask advisor.', date: d(-3), tags: ['planning'] },
+    // Questions
+    { id: 'n-6', kind: 'question', projectId: 'p-1-2', title: 'Has the advisor reviewed the pricing model yet?', body: 'Pricing model was sent to advisor 3 days ago. No response yet. Blocker for CFO sign-off.', date: d(-3), tags: ['blocker'], resolved: false },
+    { id: 'n-7', kind: 'question', projectId: 'p-2-1', title: 'Do we need GraphQL support at API v2 GA?', body: 'Original plan included GraphQL but 4 of 5 beta partners say they only need REST. Considering cutting GraphQL from v2 GA scope.', date: d(-7), tags: ['scope'], resolved: false },
+    { id: 'n-8', kind: 'question', projectId: 'p-3-1', title: '⚠ Auth dependency creates timeline conflict — how do we resolve?', body: 'Customer Onboarding (3.1) is due d+55 but depends on Auth & Permissions (2.2) which is not due until d+75. Options: (1) slip Onboarding to d+80, (2) fast-track RBAC, (3) ship onboarding without permission-gated steps as v1.', date: d(-2), tags: ['blocker', 'dependency'], resolved: false },
+    { id: 'n-9', kind: 'question', projectId: 'p-3-2', title: 'Should Help Center launch be tied to the site launch date?', body: 'Currently Help Center is due d+40, site is due d+30. Should we move Help Center to d+30 so both go live together?', date: d(-6), tags: ['scope'], resolved: false },
   ],
+
   risks: [
-    { id: 'r-1', projectId: 'p-atlas', title: 'Beta pool too small for signal', severity: 4, likelihood: 3, category: 'Resource', response: 'Reduce', mitigation: 'Expand waitlist sources; reserve 10 slots for warm intros.', trigger: 'Beta invite acceptance rate drops below 60% or fewer than 30 signups by day 3.', impact: 'Insufficient data to validate pricing or retention hypotheses; delays go/no-go decision by 2+ weeks.', owner: 'You', status: 'open', createdAt: d(-10) },
-    { id: 'r-2', projectId: 'p-atlas', title: 'Pricing page conversion stalls', severity: 3, likelihood: 3, category: 'Financial', response: 'Reduce', mitigation: 'A/B test within week 1; rollback plan in place.', trigger: 'Pricing page conversion below 2% for 48h after launch.', impact: 'Pipeline growth slows; CAC increases if paid acquisition required to compensate.', owner: 'You', status: 'open', createdAt: d(-5) },
-    { id: 'r-3', projectId: 'p-atlas', title: 'Engineering capacity during launch week', severity: 4, likelihood: 2, category: 'Resource', response: 'Reduce', mitigation: 'Freeze non-launch work T-7; oncall rota drafted.', trigger: 'Any engineer pulled for non-launch work within T-5 of launch date.', contingency: 'Delay launch by 1 week and re-staff; communicate proactively to beta waitlist.', owner: 'You', status: 'monitoring', createdAt: d(-8) },
-
-    { id: 'r-10', projectId: 'p-helios', title: 'Market window closes before term sheet', severity: 5, likelihood: 3, category: 'External', response: 'Avoid', mitigation: 'Compress outreach; book 20 meetings in first 2 weeks.', trigger: 'Fewer than 8 first meetings booked by end of week 1, or 2+ lead investors pass without feedback.', impact: 'Forces bridge round at worse terms or reduces valuation headroom for Series A.', owner: 'You', status: 'open', createdAt: d(-14) },
-    { id: 'r-11', projectId: 'p-helios', title: 'Key metric (retention) dips before close', severity: 5, likelihood: 2, category: 'Technical', response: 'Reduce', mitigation: 'Lock retention initiatives; weekly metric review.', trigger: 'D30 retention drops more than 3 percentage points in any rolling 2-week window.', contingency: 'Pause fundraise by 2 weeks to run targeted retention intervention; brief lead investors proactively.', owner: 'You', status: 'monitoring', createdAt: d(-12) },
-    { id: 'r-12', projectId: 'p-helios', title: 'Advisor availability for intros', severity: 3, likelihood: 2, category: 'Resource', response: 'Transfer', mitigation: 'Confirm 3 advisor intros/week; backup list of 2 angels.', trigger: 'Any advisor misses two consecutive weekly check-ins without rebooking.', owner: 'You', status: 'open', createdAt: d(-7) },
-
-    { id: 'r-20', projectId: 'p-orbit', title: 'Scheduling slips push synthesis past deadline', severity: 3, likelihood: 4, category: 'Schedule', response: 'Reduce', mitigation: 'Batch interviews M/W/F; cap at 45 min.', trigger: 'Fewer than 10 interviews completed by the end of week 2 of the research sprint.', owner: 'You', status: 'open', createdAt: d(-5) },
-
-    { id: 'r-30', projectId: 'p-vega', title: 'Vendor disappears; need alt', severity: 4, likelihood: 4, category: 'External', response: 'Transfer', mitigation: 'Shortlist of 2 alternates drafted; 2-week decision deadline.', trigger: 'Vendor misses SLA 2x in 30 days, or goes unresponsive for 5+ business days.', contingency: 'Activate alternate vendor from shortlist; accept 1-week data migration lag.', impact: 'Up to 2-week operational disruption; possible data migration cost $5–10k.', owner: 'You', status: 'open', createdAt: d(-9) },
-
-    { id: 'r-40', projectId: 'p-nova', title: 'Plan conflicts with Atlas launch focus', severity: 3, likelihood: 3, category: 'Schedule', response: 'Accept', mitigation: 'Time-box planning to 1 day/week until launch clears.', trigger: 'Nova planning tasks appear on daily plan more than 2x in any given week.', owner: 'You', status: 'monitoring', createdAt: d(-4) },
-  ],
-  weeklyReviews: [
-    {
-      id: 'wr-1',
-      weekOf: d(-13),
-      completed: 9,
-      delayed: 2,
-      blocked: 1,
-      plannedRatio: 0.78,
-      cycleTime: 2.1,
-      note: 'Strong week on Atlas. Helios data room slower than hoped — move up priority.',
-    },
-    {
-      id: 'wr-2',
-      weekOf: d(-6),
-      completed: 11,
-      delayed: 3,
-      blocked: 2,
-      plannedRatio: 0.64,
-      cycleTime: 2.6,
-      note: 'Reactive work spiked (Vega vendor issues). Consider dropping Vega to low until unblocked.',
-    },
+    { id: 'r-1', projectId: 'p-1-2', title: 'Advisor delay holds up CFO sign-off on pricing', severity: 3, likelihood: 4, status: 'open', category: 'external', response: 'mitigate', mitigation: 'Follow up with advisor twice a week; escalate to CEO if no response by end of week', owner: 'Delaney', createdAt: d(-3), updatedAt: d(-3) },
+    { id: 'r-2', projectId: 'p-2-1', title: 'API v2 beta reveals breaking changes in auth layer', severity: 4, likelihood: 3, status: 'open', category: 'technical', response: 'mitigate', mitigation: 'Auth layer is isolated behind feature flag; breaking changes can be rolled back independently', owner: 'Alex', createdAt: d(-20), updatedAt: d(-5) },
+    { id: 'r-3', projectId: 'p-2-2', title: 'RBAC blocker slips overall platform timeline', severity: 4, likelihood: 4, status: 'open', category: 'dependency', response: 'mitigate', mitigation: 'Escalated to CTO. API v2 auth merge is top priority in current sprint.', owner: 'Morgan', createdAt: d(-15), updatedAt: d(-3) },
+    { id: 'r-4', projectId: 'p-3-1', title: '⚠ Auth slip pushes past Onboarding deadline', severity: 5, likelihood: 4, status: 'open', category: 'dependency', response: 'accept', mitigation: 'Onboarding (3.1) is due d+55 but depends on Auth (2.2) due d+75. Must choose: slip Onboarding, fast-track Auth, or descope permission-gated steps.', owner: 'Jordan', createdAt: d(-2), updatedAt: d(-2) },
+    { id: 'r-5', projectId: 'p-3-1', title: 'Onboarding due date conflicts with Auth dependency', severity: 5, likelihood: 5, status: 'open', category: 'dependency', response: 'accept', mitigation: 'Deep dependency violation: p-3-1 due d+55, requires p-2-2 done by d+75. Current plan is physically impossible without a scope or timeline change.', owner: 'Delaney', createdAt: d(-1), updatedAt: d(-1) },
+    { id: 'r-6', projectId: 'p-2-3', title: 'ClickHouse self-managed ops burden underestimated', severity: 3, likelihood: 3, status: 'open', category: 'technical', response: 'mitigate', mitigation: 'Evaluating ClickHouse Cloud as managed option if self-managed setup takes > 2 weeks', owner: 'Sam', createdAt: d(-10), updatedAt: d(-10) },
   ],
 
-  // Jira (read-only)
-  jiraProjects: [
-    { id: 'jp-atl', key: 'ATL', name: 'Atlas', projectId: 'p-atlas', lead: 'Priya S.' },
-    { id: 'jp-hel', key: 'HEL', name: 'Helios', projectId: 'p-helios', lead: 'You' },
-    { id: 'jp-orb', key: 'ORB', name: 'Orbit Research', projectId: 'p-orbit', lead: 'Mina K.' },
-    { id: 'jp-plat', key: 'PLAT', name: 'Platform', projectId: null, lead: 'Dev Bhatt' },
-  ],
-  sprints: [
-    { id: 'sp-1', jiraProjectId: 'jp-atl', name: 'Atlas · Sprint 14', state: 'active', start: d(-6), end: d(8), goal: 'Private beta infra ready; pricing telemetry fixed.' },
-    { id: 'sp-2', jiraProjectId: 'jp-atl', name: 'Atlas · Sprint 13', state: 'closed', start: d(-20), end: d(-7), goal: 'Land pricing page and narrative.' },
-    { id: 'sp-3', jiraProjectId: 'jp-hel', name: 'Helios · Data Room', state: 'active', start: d(-10), end: d(4), goal: 'Complete data room v2 and narrative deck.' },
-    { id: 'sp-4', jiraProjectId: 'jp-orb', name: 'Orbit · Synthesis', state: 'active', start: d(-4), end: d(10), goal: 'Close 20 interviews; draft synthesis.' },
-    { id: 'sp-5', jiraProjectId: 'jp-plat', name: 'Platform · Wk 16', state: 'active', start: d(-3), end: d(11), goal: 'SSO rollout + logging cleanup.' },
-  ],
-  jiraIssues: [
-    { id: 'j-1', key: 'ATL-412', projectKey: 'ATL', sprintId: 'sp-1', type: 'Story', status: 'In Progress', priority: 'High', assignee: 'Priya S.', reporter: 'You', summary: 'Rewrite hero copy with new positioning', storyPoints: 3, labels: ['marketing','launch'], updated: d(0), description: 'Aligns with positioning doc v3. Blocker: need approved product shot from design.' },
-    { id: 'j-2', key: 'ATL-415', projectKey: 'ATL', sprintId: 'sp-1', type: 'Task', status: 'To Do', priority: 'High', assignee: 'Dev Bhatt', reporter: 'You', summary: 'A/B test pricing CTA variants', storyPoints: 5, labels: ['pricing','experiment'], updated: d(-1), description: 'Variants: "Start free" vs "Get a demo". Min 7-day exposure; 1000 sessions per arm.' },
-    { id: 'j-3', key: 'ATL-420', projectKey: 'ATL', sprintId: 'sp-1', type: 'Bug', status: 'Blocked', priority: 'High', assignee: 'Dev Bhatt', reporter: 'Priya S.', summary: 'Analytics events on /trial not firing', storyPoints: 2, labels: ['bug','analytics'], updated: d(0), description: 'Confirmed via Mixpanel. trial_started missing since deploy Friday. Rollback candidate.' },
-    { id: 'j-4', key: 'ATL-421', projectKey: 'ATL', sprintId: 'sp-1', type: 'Story', status: 'To Do', priority: 'Medium', assignee: 'Priya S.', reporter: 'You', summary: 'Draft beta welcome email sequence', storyPoints: 3, labels: ['lifecycle'], updated: d(-2), description: '3-email sequence. Goal: activation within 72 hrs.' },
-    { id: 'j-5', key: 'ATL-399', projectKey: 'ATL', sprintId: 'sp-1', type: 'Task', status: 'In Progress', priority: 'Medium', assignee: 'Lee W.', reporter: 'You', summary: 'Build invite gate for private beta', storyPoints: 5, labels: ['infra'], updated: d(-1), description: 'Gates /trial signups behind invite code. Stripe coupon optional.' },
-    { id: 'j-6', key: 'ATL-405', projectKey: 'ATL', sprintId: 'sp-1', type: 'Task', status: 'Done', priority: 'Medium', assignee: 'Priya S.', reporter: 'You', summary: 'Legal review of pricing tiers', storyPoints: 2, labels: ['legal'], updated: d(-2), description: 'Counsel signed off. Terms page updated.' },
-    { id: 'j-7', key: 'ATL-410', projectKey: 'ATL', sprintId: 'sp-1', type: 'Story', status: 'In Review', priority: 'High', assignee: 'Lee W.', reporter: 'Priya S.', summary: 'Telemetry for pricing page', storyPoints: 3, labels: ['analytics'], updated: d(0), description: 'Segment events for hero CTA, tier selector, scroll depth.' },
-    { id: 'j-8', key: 'ATL-388', projectKey: 'ATL', sprintId: 'sp-2', type: 'Story', status: 'Done', priority: 'High', assignee: 'Priya S.', reporter: 'You', summary: 'Finalize positioning doc v3', storyPoints: 8, labels: ['narrative'], updated: d(-14), description: 'Approved by advisors. Locked for launch.' },
-    { id: 'j-9', key: 'ATL-392', projectKey: 'ATL', sprintId: 'sp-2', type: 'Task', status: 'Done', priority: 'High', assignee: 'Lee W.', reporter: 'You', summary: 'Pricing page live', storyPoints: 5, labels: ['landing'], updated: d(-3), description: 'Shipped with A/B framework scaffold.' },
-    { id: 'j-20', key: 'HEL-45', projectKey: 'HEL', sprintId: 'sp-3', type: 'Task', status: 'In Progress', priority: 'Highest', assignee: 'You', reporter: 'You', summary: 'Financial model v4', storyPoints: 8, labels: ['fundraise'], updated: d(0), description: 'Three scenarios: base, upside, stretch. Lock net burn by Friday.' },
-    { id: 'j-21', key: 'HEL-46', projectKey: 'HEL', sprintId: 'sp-3', type: 'Task', status: 'Blocked', priority: 'Highest', assignee: 'You', reporter: 'You', summary: 'Cap table upload to data room', storyPoints: 1, labels: ['dataroom'], updated: d(-1), description: 'Waiting on counsel (Sasha) for clean cap table export.' },
-    { id: 'j-22', key: 'HEL-48', projectKey: 'HEL', sprintId: 'sp-3', type: 'Story', status: 'In Progress', priority: 'High', assignee: 'You', reporter: 'You', summary: 'Deck narrative pass with advisor', storyPoints: 3, labels: ['deck'], updated: d(0), description: 'Advisor: Priya C. Focus: pivot narrative in slides 4–7.' },
-    { id: 'j-23', key: 'HEL-52', projectKey: 'HEL', sprintId: 'sp-3', type: 'Task', status: 'To Do', priority: 'Medium', assignee: 'You', reporter: 'You', summary: 'Prep Q&A doc for investor calls', storyPoints: 3, labels: ['fundraise'], updated: d(-2), description: 'Organize by theme: traction, team, moat, roadmap.' },
-    { id: 'j-30', key: 'ORB-18', projectKey: 'ORB', sprintId: 'sp-4', type: 'Task', status: 'In Progress', priority: 'High', assignee: 'Mina K.', reporter: 'You', summary: 'Schedule remaining 6 interviews', storyPoints: 2, labels: ['research'], updated: d(0), description: '14 of 20 done. Target: ops leads at 50–200 person cos.' },
-    { id: 'j-31', key: 'ORB-19', projectKey: 'ORB', sprintId: 'sp-4', type: 'Task', status: 'To Do', priority: 'Medium', assignee: 'Mina K.', reporter: 'You', summary: 'Transcribe last 4 interviews', storyPoints: 3, labels: ['research'], updated: d(-2), description: 'Using Rev. Redact PII before uploading.' },
-    { id: 'j-32', key: 'ORB-21', projectKey: 'ORB', sprintId: 'sp-4', type: 'Story', status: 'To Do', priority: 'High', assignee: 'You', reporter: 'You', summary: 'Code themes across 14 transcripts', storyPoints: 5, labels: ['synthesis'], updated: d(-2), description: 'Emerging theme: workflow handoff breakage (8/14).' },
-    { id: 'j-40', key: 'PLAT-101', projectKey: 'PLAT', sprintId: 'sp-5', type: 'Story', status: 'In Progress', priority: 'High', assignee: 'Dev Bhatt', reporter: 'Dev Bhatt', summary: 'SSO with Okta for enterprise', storyPoints: 8, labels: ['enterprise','auth'], updated: d(0), description: 'SAML + SCIM. Tested with one prospect sandbox.' },
-    { id: 'j-41', key: 'PLAT-104', projectKey: 'PLAT', sprintId: 'sp-5', type: 'Bug', status: 'To Do', priority: 'Medium', assignee: 'Lee W.', reporter: 'Dev Bhatt', summary: 'Log rotation failing nightly', storyPoints: 2, labels: ['infra'], updated: d(-1), description: 'Disk fills ~02:00 UTC. Alert tripped 3 nights in a row.' },
-    { id: 'j-42', key: 'PLAT-107', projectKey: 'PLAT', sprintId: 'sp-5', type: 'Task', status: 'In Review', priority: 'Medium', assignee: 'Dev Bhatt', reporter: 'Lee W.', summary: 'Upgrade Postgres to 16', storyPoints: 3, labels: ['infra'], updated: d(-1), description: 'Staging done. Prod cutover scheduled for Sunday.' },
-  ],
-
-  // Confluence (read-only)
-  confluenceSpaces: [
-    { id: 'cs-prod', key: 'PROD', name: 'Product', icon: '◎' },
-    { id: 'cs-eng',  key: 'ENG',  name: 'Engineering', icon: '◇' },
-    { id: 'cs-gtm',  key: 'GTM',  name: 'GTM', icon: '◈' },
-    { id: 'cs-ops',  key: 'OPS',  name: 'Operations', icon: '○' },
-  ],
-  confluencePages: [
-    { id: 'cp-1', spaceId: 'cs-prod', title: 'Atlas v2 — Product Requirements', author: 'Priya S.', updated: d(-2), tags: ['atlas','prd'],
-      body: `# Atlas v2 PRD\n\n**Owner:** Priya S. · **Status:** In review\n\n## Problem\nPower users hit workflow handoff breakage (cited by 8/14 research interviews). Positioning does not speak to this pain.\n\n## Goals\n- 30% uplift in landing → trial conversion\n- Pricing page CTR > 12%\n- Activation within 72 hours of signup\n\n## Scope\nIn: new landing, pricing page, private beta gate, welcome email sequence.\nOut: mobile app changes, SSO (tracked in PLAT-101).\n\n## Open questions\n- Do we require SOC2 at launch? (2 enterprise prospects asked)\n- Bet sizing for beta pool — 50 or 200 invites?` },
-    { id: 'cp-2', spaceId: 'cs-prod', title: 'Positioning Doc v3 (locked)', author: 'You', updated: d(-14), tags: ['atlas','narrative'],
-      body: `# Positioning v3\n\n**For:** ops leads at 50–200 person companies\n**Who:** need to move fast without breaking handoffs\n**Atlas is:** the operating layer that keeps work connected\n**Unlike:** point tools that silo context\n**We:** give operators one control surface for execution\n\n## Proof points\n- Reduces handoff breakage by ~60% (pilot data)\n- Integrates with Jira, Slack, Linear, Confluence` },
-    { id: 'cp-3', spaceId: 'cs-prod', title: 'Q3 Planning — Draft', author: 'You', updated: d(-3), tags: ['planning'],
-      body: `# Q3 Plan (Draft)\n\n## Three bets\n1. **Distribution** — inbound content engine\n2. **Platform** — SSO + audit log to unlock enterprise\n3. **Monetization** — pricing experiments & packaging\n\n## Risks\n- Atlas launch overlap with planning cycle\n- Fundraise pulls focus Aug–Sep` },
-    { id: 'cp-4', spaceId: 'cs-eng', title: 'SSO Rollout Plan (Okta, SAML)', author: 'Dev Bhatt', updated: d(-5), tags: ['platform','auth'],
-      body: `# SSO Rollout\n\n**Ticket:** PLAT-101\n**Scope:** SAML + SCIM, Okta first, Azure AD fast-follow.\n\n## Milestones\n- Sandbox tested: done\n- Prod config: next week\n- Customer pilot: following week\n\n## Open\n- Session length policy (default 12h, configurable?)\n- Deprovisioning SLA` },
-    { id: 'cp-5', spaceId: 'cs-eng', title: 'Incident Runbook', author: 'Lee W.', updated: d(-20), tags: ['runbook'],
-      body: `# Incident Runbook\n\n1. Acknowledge in PagerDuty within 5 min\n2. Open #incident Slack channel\n3. Assign IC (usually oncall)\n4. Status page within 15 min if user-facing\n5. Postmortem within 48h` },
-    { id: 'cp-6', spaceId: 'cs-eng', title: 'Postgres 16 Upgrade Notes', author: 'Dev Bhatt', updated: d(-1), tags: ['infra'],
-      body: `# Postgres 16 Upgrade\n\n**Ticket:** PLAT-107\n\n## Staging\nCut over 4 days ago. No migration issues. Query planner regressions minor.\n\n## Prod\nSchedule: Sunday 02:00 UTC.\nRollback: snapshot + PITR window 48h.` },
-    { id: 'cp-7', spaceId: 'cs-gtm', title: 'Launch Playbook — Atlas v2', author: 'Priya S.', updated: d(-4), tags: ['atlas','launch'],
-      body: `# Launch Playbook\n\n## T-7\n- Freeze non-launch eng work\n- Invite list locked at 50\n\n## T-1\n- Dry run with advisors\n- Press embargo pack sent\n\n## Launch day\n- HN post at 09:00 PT\n- Announcement email 10:00 PT\n- Twitter thread + LinkedIn 10:05 PT` },
-    { id: 'cp-8', spaceId: 'cs-gtm', title: 'Customer Research Synthesis (WIP)', author: 'Mina K.', updated: d(-3), tags: ['research','orbit'],
-      body: `# Synthesis (in progress · 14/20)\n\n## Themes surfacing\n1. **Workflow handoff breakage** — 8/14\n2. **Tool sprawl** — 11/14\n3. **Unclear ownership** — 6/14\n\n## Quotes\n> "I spend half my week just chasing status."\n> "Handoffs between PM and design are where things die."\n\n## Implications for Atlas\n- Double down on handoff connective tissue\n- Pricing should lead with "one control surface"` },
-    { id: 'cp-9', spaceId: 'cs-ops', title: 'Vendor consolidation — Ramp + Attio', author: 'You', updated: d(-30), tags: ['tooling'],
-      body: `# Vendor Consolidation\n\n**Decision:** consolidate on Ramp (expenses) + Attio (CRM). Drop Brex, HubSpot, Airtable.\n**Savings:** ~$410/mo.\n**Migration:** blocked — vendor silent on redlines (9 days).` },
-    { id: 'cp-10', spaceId: 'cs-prod', title: 'Fundraise narrative (Helios)', author: 'You', updated: d(-7), tags: ['helios','fundraise'],
-      body: `# Helios narrative\n\n## One-liner\nAtlas keeps work connected across the tools operators already use.\n\n## Why now\n- Tool sprawl peaking\n- AI enables a new operating layer\n\n## Ask\n$2.5M bridge, 18-month runway, close by July.` },
+  blockers: [
+    { id: 'bl-1', taskId: 't-6',  projectId: 'p-1-2', reason: 'Waiting for advisor to respond to pricing model sent 3 days ago', since: d(-3), resolvedAt: null },
+    { id: 'bl-2', taskId: 't-12', projectId: 'p-2-2', reason: 'API v2 auth primitives not yet merged into main — RBAC schema cannot be finalized until auth interfaces are stable', since: d(-15), resolvedAt: null },
   ],
 
   meetings: [
-    {
-      id: 'mt-1',
-      projectIds: ['p-atlas'],
-      title: 'Atlas sprint planning',
-      date: d(-2),
-      attendees: 'Dev Bhatt, Sara Kim, You',
-      recurrence: 'weekly',
-      notes: 'Agreed to push ATL-412 hero copy rewrite to top of queue. Dev flagged the analytics rollback risk — will monitor for 48h before reverting. Sara to unblock design assets by EOD Thursday.',
-      createdAt: d(-2),
-    },
-    {
-      id: 'mt-2',
-      projectIds: ['p-helios'],
-      title: 'Investor call — Sequoia',
-      date: d(1),
-      attendees: 'Marcus Lee (Sequoia), You',
-      recurrence: 'none',
-      notes: 'Intro call. Send deck and financial model beforehand. Key question expected: why now, why us on distribution. Prep 3-slide narrative arc.',
-      createdAt: d(-1),
-    },
-    {
-      id: 'mt-3',
-      projectIds: ['p-orbit', 'p-atlas'],
-      title: 'Research sync',
-      date: d(-7),
-      attendees: 'Priya Nair, You',
-      recurrence: 'biweekly',
-      notes: 'Walk through coded themes from 14 interviews. Align on top 3 insight clusters before writing synthesis outline. Priya to bring her affinity map.',
-      createdAt: d(-7),
-    },
+    { id: 'mt-1', title: 'Launch timeline sync', projectIds: ['p-1-1', 'p-1-2', 'p-3-1'], date: d(-3), attendees: 'Delaney, Jordan, Sam', notes: 'Reviewed launch timeline. Flagged p-3-1 / p-2-2 dependency conflict. Jordan to propose options by EOW.', createdAt: d(-3) },
+    { id: 'mt-2', title: 'API v2 beta review', projectIds: ['p-2-1', 'p-2-2'], date: d(-7), attendees: 'Alex, Morgan, Delaney', notes: 'Beta partners happy with REST endpoints. Discussed cutting GraphQL from GA scope. Agreed to decide by next week. RBAC blocked on auth merge — Alex to prioritize this week.', createdAt: d(-7) },
+    { id: 'mt-3', title: 'Analytics pipeline kickoff', projectIds: ['p-2-3'], date: d(-12), attendees: 'Sam, Delaney', notes: 'ClickHouse selected over BigQuery. Sam to provision cluster and run load test at 10k events/day within 2 weeks.', createdAt: d(-12) },
+    { id: 'mt-4', title: 'Weekly all-hands', projectIds: ['p-1-1', 'p-1-2', 'p-2-1', 'p-2-2', 'p-2-3', 'p-3-1', 'p-3-2'], date: d(2), attendees: 'All', notes: '', createdAt: d(0) },
   ],
 
-  // Daily plan artifacts (keyed by date)
+  weeklyReviews: [],
+  chatThreads: [],
+  reminders: [],
   dailyPlans: {},
-
-  // Chat threads
-  chatThreads: [
-    {
-      id: 'ct-1',
-      title: 'Atlas sprint blockers',
-      createdAt: d(-1),
-      messages: [
-        { role: 'user', text: 'What is blocking the Atlas sprint right now?' },
-        { role: 'assistant', text: 'Atlas · Sprint 14 (ends in 8d) has 1 blocked issue and 3 in-progress items.\n\nBlockers:\n• ATL-420 — analytics events on /trial not firing (High, Dev Bhatt). Candidate for rollback of Friday deploy.\n\nAt-risk:\n• ATL-412 "Rewrite hero copy" — waiting on approved product shot from design.', citations: ['ATL-420','ATL-412'] },
-      ],
-    },
-  ],
+  dayNotes: [],
 };
 
 window.SEED = SEED;

@@ -594,7 +594,7 @@ app.get('/api/confluence/spaces', async (req, res) => {
 // ── AI chat ───────────────────────────────────────────────────────────────────
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { system, messages, provider: reqProvider } = req.body;
+  const { system, messages, provider: reqProvider, tools } = req.body;
 
   const claudeToken = getToken('claude');
   const openaiToken = getToken('openai');
@@ -649,19 +649,29 @@ app.post('/api/ai/chat', async (req, res) => {
 
     } else {
       if (!anthropicKey) return res.status(400).json({ error: 'Anthropic API key not configured.' });
+      const body = {
+        model: claudeToken?.model || process.env.ANTHROPIC_MODEL || 'claude-opus-4-7',
+        max_tokens: 2048,
+        system: system || 'You are a helpful project management assistant.',
+        messages,
+      };
+      if (tools && tools.length > 0) body.tools = tools;
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: claudeToken?.model || process.env.ANTHROPIC_MODEL || 'claude-opus-4-7',
-          max_tokens: 1024,
-          system: system || 'You are a helpful project management assistant.',
-          messages,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || `Anthropic API error ${response.status}`);
-      res.json({ text: data.content[0].text, provider: 'claude' });
+      // Extract text and tool_use blocks
+      const textBlock = data.content.find(b => b.type === 'text');
+      const toolUses = data.content.filter(b => b.type === 'tool_use');
+      res.json({
+        text: textBlock?.text || '',
+        tool_calls: toolUses.map(b => ({ id: b.id, name: b.name, input: b.input })),
+        stop_reason: data.stop_reason,
+        provider: 'claude',
+      });
     }
   } catch (e) {
     console.error('[ai] chat error:', e.message);

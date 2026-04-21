@@ -642,7 +642,7 @@ function MilestoneCompactList({ project, milestones }) {
           <div key={m.id} className={`ms-compact-row ${toneClass}`}>
             <div className={`tl-ms tl-ms-${m.status}`} style={{ position: 'static', transform: 'none' }} />
             <div style={{ minWidth: 0 }}>
-              <div className="ms-compact-title" title={m.title}>{m.title}</div>
+              <div className="ms-compact-title" title={m.name}>{m.name}</div>
               {m.deliverable && <div className="ms-compact-sub">{m.deliverable}</div>}
             </div>
             <div className="ms-compact-date">
@@ -716,7 +716,7 @@ function MilestoneTimeline({ project, milestones }) {
               <div className={`tl-ms-stem tl-ms-stem-${side}`} style={{ height: offset - 6 }} />
               <div className={`tl-ms-callout tl-ms-callout-${side}`} style={calloutStyle}>
                 <div className="tl-ms-date">{fmtDate(m.date)}</div>
-                <div className="tl-ms-label" title={m.title}>{m.title}</div>
+                <div className="tl-ms-label" title={m.name}>{m.name}</div>
               </div>
             </div>
           );
@@ -728,16 +728,17 @@ function MilestoneTimeline({ project, milestones }) {
 
 function MilestoneRow({ milestone: m }) {
   const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState({ title: m.title, date: m.date, deliverable: m.deliverable || '' });
+  const [draft, setDraft] = React.useState({ name: m.name, description: m.description || '', date: m.date, deliverable: m.deliverable || '' });
 
   if (editing) {
     return (
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
         <div className="row-2" style={{ marginBottom: 8 }}>
-          <input className="input" placeholder="Title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} autoFocus />
+          <input className="input" placeholder="Milestone name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus />
           <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
         </div>
-        <input className="input" placeholder="Deliverable" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} style={{ marginBottom: 8 }} />
+        <input className="input" placeholder="Description (what must be true at this point)" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ marginBottom: 8 }} />
+        <input className="input" placeholder="Deliverable (artifact or shipped capability that proves completion)" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} style={{ marginBottom: 8 }} />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button className="btn btn-danger-ghost btn-sm" onClick={() => { if (confirm('Delete milestone?')) actions.deleteMilestone(m.id); }}>Delete</button>
           <button className="btn btn-sm" onClick={() => setEditing(false)}>Cancel</button>
@@ -750,8 +751,9 @@ function MilestoneRow({ milestone: m }) {
     <div className="ms-row ms-row-hoverable" onClick={() => setEditing(true)}>
       <span className={`ms-row-bullet tl-ms-${m.status}`} />
       <div>
-        <div style={{ fontWeight: 500 }}>{m.title}</div>
-        {m.deliverable && <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, marginTop: 2 }}>{m.deliverable}</div>}
+        <div style={{ fontWeight: 500 }}>{m.name}</div>
+        {m.description && <div style={{ color: 'var(--fg-3)', fontSize: 11.5, marginTop: 1 }}>{m.description}</div>}
+        {m.deliverable && <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, marginTop: 2 }}>→ {m.deliverable}</div>}
       </div>
       <DueChip date={m.date} />
       <select className="select" style={{ padding: '3px 6px', fontSize: 11 }} value={m.status}
@@ -769,7 +771,7 @@ function MilestoneRow({ milestone: m }) {
 
 function MilestonesTab({ project, milestones }) {
   const [adding, setAdding] = React.useState(false);
-  const [draft, setDraft] = React.useState({ title: '', date: '', deliverable: '' });
+  const [draft, setDraft] = React.useState({ name: '', description: '', date: '', deliverable: '' });
 
   return (
     <div className="card">
@@ -781,16 +783,17 @@ function MilestonesTab({ project, milestones }) {
       {adding && (
         <div style={{ padding: 12, borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
           <div className="row-2" style={{ marginBottom: 8 }}>
-            <input className="input" placeholder="Milestone title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+            <input className="input" placeholder="Milestone name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus />
             <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
           </div>
-          <input className="input" placeholder="Deliverable" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} />
+          <input className="input" placeholder="Description (what must be true at this point)" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ marginBottom: 8 }} />
+          <input className="input" placeholder="Deliverable (artifact that proves completion)" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} />
           <div className="modal-foot">
             <button className="btn" onClick={() => setAdding(false)}>Cancel</button>
             <button className="btn btn-primary" onClick={() => {
-              if (!draft.title || !draft.date) return;
+              if (!draft.name || !draft.date) return;
               actions.addMilestone({ ...draft, projectId: project.id });
-              setDraft({ title: '', date: '', deliverable: '' });
+              setDraft({ name: '', description: '', date: '', deliverable: '' });
               setAdding(false);
             }}>Add</button>
           </div>

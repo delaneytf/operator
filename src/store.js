@@ -1,7 +1,26 @@
 // Simple localStorage-backed store with React hook integration.
 // Single source of truth, shallow-merged updates, immediate persistence.
+// Two modes: 'seed' (demo data, read from SEED) and 'local' (blank workspace).
 
-const STORAGE_KEY = 'opm.v4';
+const MODE_KEY  = 'opm.mode';
+const SEED_KEY  = 'opm.seed';
+const LOCAL_KEY = 'opm.local';
+
+// Legacy key — migrate if present
+const LEGACY_KEY = 'opm.v4';
+
+function getMode() {
+  return localStorage.getItem(MODE_KEY) || 'seed';
+}
+function setMode(m) {
+  localStorage.setItem(MODE_KEY, m);
+}
+function getStorageKey() {
+  return getMode() === 'local' ? LOCAL_KEY : SEED_KEY;
+}
+
+// Keep STORAGE_KEY for backward-compat references in TweaksPanel
+const STORAGE_KEY = SEED_KEY;
 
 const LEGACY_PRIORITY = { P0: 'critical', P1: 'high', P2: 'medium', P3: 'low' };
 const migP = (p) => LEGACY_PRIORITY[p] || p;
@@ -15,45 +34,71 @@ function migratePriorities(state) {
 }
 
 function buildEmptyState() {
-  const s = structuredClone(window.SEED);
-  Object.keys(s).forEach((k) => { if (Array.isArray(s[k])) s[k] = []; });
-  s.meta = {
-    ...s.meta,
-    activeView: 'today',
-    activeProjectId: null,
-    integrations: {},
-    plannedToday: [],
-    yesterdayShipped: [],
+  return {
+    version: window.SEED.version,
+    programs: [],
+    projects: [],
+    milestones: [],
+    tasks: [],
+    notes: [],
+    risks: [],
+    blockers: [],
+    meetings: [],
+    weeklyReviews: [],
+    chatThreads: [],
+    reminders: [],
     dailyPlans: {},
+    dayNotes: [],
+    meta: {
+      theme: 'dark',
+      density: 'compact',
+      accent: 'amber',
+      monoIds: true,
+      activeView: 'portfolio',
+      activeProjectId: null,
+      activeProgramId: null,
+      lastWeeklyReview: null,
+      lastPlanDate: null,
+      plannedToday: [],
+      yesterdayShipped: [],
+      riskFields: ['category', 'response'],
+      nextTaskId: 1,
+      nextNoteId: 1,
+      nextRiskId: 1,
+      integrations: {},
+    },
   };
-  return s;
 }
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      // In packaged Electron app, start blank instead of showing demo data
-      return window.__ELECTRON__ ? buildEmptyState() : structuredClone(window.SEED);
+    // One-time migration from legacy key
+    if (!localStorage.getItem(SEED_KEY) && localStorage.getItem(LEGACY_KEY)) {
+      localStorage.setItem(SEED_KEY, localStorage.getItem(LEGACY_KEY));
+      localStorage.removeItem(LEGACY_KEY);
     }
+    const key = getStorageKey();
+    const raw = localStorage.getItem(key);
+    const isLocal = getMode() === 'local';
+    if (!raw) return isLocal ? buildEmptyState() : structuredClone(window.SEED);
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.version !== window.SEED.version) {
-      return window.__ELECTRON__ ? buildEmptyState() : structuredClone(window.SEED);
+      return isLocal ? buildEmptyState() : structuredClone(window.SEED);
     }
     return migratePriorities(parsed);
   } catch (e) {
-    console.warn('[store] failed to load, seeding', e);
-    return window.__ELECTRON__ ? buildEmptyState() : structuredClone(window.SEED);
+    console.warn('[store] failed to load, using default', e);
+    return getMode() === 'local' ? buildEmptyState() : structuredClone(window.SEED);
   }
 }
 
 function saveState(state) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(getStorageKey(), JSON.stringify(state));
   } catch (e) {
     console.error('[store] localStorage save failed', e);
   }
-  saveToServer(state);
+  if (getMode() !== 'local') saveToServer(state);
 }
 
 let _serverSaveTimer = null;
@@ -69,20 +114,21 @@ function saveToServer(state) {
 }
 
 async function loadFromServer() {
+  if (getMode() === 'local') return; // local workspace is localStorage-only
   try {
     const res = await fetch('/api/data');
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.version) return;
     if (data.version !== window.SEED.version) {
-      STATE = structuredClone(window.SEED);
+      STATE = getMode() === 'local' ? buildEmptyState() : structuredClone(window.SEED);
       saveState(STATE);
       subscribers.forEach((fn) => fn());
       console.log('[store] server data version mismatch — reseeded');
       return;
     }
     STATE = migratePriorities(data);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch {}
+    try { localStorage.setItem(getStorageKey(), JSON.stringify(STATE)); } catch {}
     subscribers.forEach((fn) => fn());
     console.log('[store] loaded from server');
   } catch {
@@ -501,8 +547,8 @@ const actions = {
 
   // Admin
   resetAll() {
-    localStorage.removeItem(STORAGE_KEY);
-    STATE = structuredClone(window.SEED);
+    localStorage.removeItem(getStorageKey());
+    STATE = getMode() === 'local' ? buildEmptyState() : structuredClone(window.SEED);
     saveState(STATE);
     subscribers.forEach((fn) => fn());
   },
@@ -511,4 +557,4 @@ const actions = {
 // On load, pull latest data from server (overrides localStorage if server has data)
 window.addEventListener('load', () => { setTimeout(loadFromServer, 0); });
 
-Object.assign(window, { useStore, getState, setState, actions, STORAGE_KEY });
+Object.assign(window, { useStore, getState, setState, actions, STORAGE_KEY, getMode, setMode });

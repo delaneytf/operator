@@ -95,15 +95,16 @@ function App() {
   };
   const onDragEnd = () => { setDragId(null); setDragOverId(null); };
 
-  const isElectronMac = window.__ELECTRON__ && window.__PLATFORM__ === 'darwin';
+  const [mode, setModeState] = React.useState(() => window.getMode());
+  const switchMode = (m) => {
+    window.setMode(m);
+    setModeState(m);
+    window.location.reload();
+  };
 
   return (
     <div className="app">
       <aside className="sidebar">
-        {/* Spacer that clears macOS traffic lights and acts as a drag handle */}
-        {isElectronMac && (
-          <div style={{ height: 28, marginTop: -12, marginLeft: -10, marginRight: -10, flexShrink: 0, WebkitAppRegion: 'drag' }} />
-        )}
         <div className="sb-brand">
           <div className="sb-brand-mark">◎</div>
           <div style={{ fontFamily: 'Helvetica' }}>
@@ -235,7 +236,11 @@ function App() {
                         <button className="sb-program-toggle" onClick={() => setCollapsedPrograms((x) => ({ ...x, [pg.id]: !x[pg.id] }))}>
                           <Icon name={collapsed ? 'chevronR' : 'chevronD'} size={9} />
                         </button>
-                        <span className="sb-program-name" title={pg.description || undefined}>{pg.name}</span>
+                        <button className="sb-program-name" title={pg.description || 'Open program'}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', color: 'inherit', font: 'inherit' }}
+                          onClick={() => actions.setMeta({ activeView: 'program', activeProgramId: pg.id })}>
+                          {pg.name}
+                        </button>
                         {pgProjs.length > 0 && <span className="sb-program-count">{pgProjs.length}</span>}
                         <div className="sb-program-actions">
                           <button className="sb-program-btn" title="Add project to program"
@@ -352,8 +357,8 @@ function App() {
       </aside>
 
       <main className="main">
-        <div className="topbar" style={isElectronMac ? { WebkitAppRegion: 'drag' } : undefined}>
-          <div className="topbar-left" style={isElectronMac ? { WebkitAppRegion: 'no-drag' } : undefined}>
+        <div className="topbar">
+          <div className="topbar-left">
             <div className="crumbs">
               {state.meta.activeView === 'today' && <strong>Today <span style={{ fontWeight: 400, color: 'var(--fg-4)' }}>· {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></strong>}
               {state.meta.activeView === 'portfolio' && <strong>Portfolio</strong>}
@@ -379,7 +384,11 @@ function App() {
               )}
             </div>
           </div>
-          <div className="topbar-right" style={isElectronMac ? { WebkitAppRegion: 'no-drag' } : undefined}>
+          <div className="topbar-right">
+            <div className="seg" title="Switch between demo data and your real workspace" style={{ marginRight: 4 }}>
+              <button className={`seg-btn${mode === 'seed' ? ' active' : ''}`} onClick={() => switchMode('seed')} style={{ fontSize: 11 }}>Seed demo</button>
+              <button className={`seg-btn${mode === 'local' ? ' active' : ''}`} onClick={() => switchMode('local')} style={{ fontSize: 11 }}>My workspace</button>
+            </div>
             <div className="topbar-search">
               <Icon name="search" size={12} />
               <input
@@ -421,6 +430,9 @@ function App() {
           {state.meta.activeView === 'integrations' && <IntegrationsView state={state} />}
           {state.meta.activeView === 'project' && activeProject && (
             <ProjectView state={state} projectId={activeProject.id} onOpenTask={setTaskModalId} onBack={() => setView('portfolio')} />
+          )}
+          {state.meta.activeView === 'program' && state.meta.activeProgramId && (
+            <ProgramView state={state} programId={state.meta.activeProgramId} onOpenProject={(id) => setView('project', id)} />
           )}
         </div>
       </main>

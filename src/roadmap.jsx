@@ -24,11 +24,14 @@ function RoadmapView({ state }) {
   const [zoom, setZoom]            = React.useState('month');
   const [programFilter, setFilter] = React.useState(null);
   const [collapsed, setCollapsed]  = React.useState({});
-  const [showMilestones, setShowMs] = React.useState(true);
-  const [showCritPath, setShowCP]  = React.useState(false);
-  const [depsMode, setDepsMode]    = React.useState('hover');
-  const [hoveredId, setHoveredId]  = React.useState(null);
-  const [ganttScroll, setGanttScroll] = React.useState(0);
+  const [showMilestones, setShowMs]     = React.useState(true);
+  const [showCritPath, setShowCP]       = React.useState(false);
+  const [showViolations, setShowViol]   = React.useState(true);
+  const [depsMode, setDepsMode]         = React.useState('hover');
+  const [hoveredId, setHoveredId]       = React.useState(null);
+  const [ganttScroll, setGanttScroll]   = React.useState(0);
+  const [dragging, setDragging]         = React.useState(null); // { projId, startX, deltaX }
+  const didDragRef                      = React.useRef(false);
   const bodyRef = React.useRef(null);
 
   const programs   = state.programs  || [];
@@ -66,6 +69,48 @@ function RoadmapView({ state }) {
       setGanttScroll(sl);
     }
   }, [zoom]);
+
+  // ── drag-to-move bar ───────────────────────────────────────────────────────
+  const shiftDate = (s, deltaDays) => {
+    if (!s) return s;
+    const d = new Date(s + 'T00:00:00');
+    d.setDate(d.getDate() + deltaDays);
+    return d.toISOString().slice(0, 10);
+  };
+
+  React.useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e) => setDragging(prev => ({ ...prev, deltaX: e.clientX - prev.startX }));
+    const onUp   = (e) => {
+      const deltaDays = Math.round((e.clientX - dragging.startX) / dayPx);
+      if (deltaDays !== 0) {
+        didDragRef.current = true;
+        const proj = projects.find(p => p.id === dragging.projId);
+        if (proj) {
+          actions.updateProject(proj.id, {
+            startDate: shiftDate(proj.startDate, deltaDays),
+            dueDate:   shiftDate(proj.dueDate,   deltaDays),
+          });
+          milestones.filter(m => m.projectId === proj.id).forEach(m =>
+            actions.updateMilestone(m.id, { date: shiftDate(m.date, deltaDays) })
+          );
+          (state.tasks || []).filter(t => t.projectId === proj.id && t.dueDate).forEach(t =>
+            actions.updateTask(t.id, { dueDate: shiftDate(t.dueDate, deltaDays) })
+          );
+          (state.risks || []).filter(r => r.projectId === proj.id && r.dueDate).forEach(r =>
+            actions.updateRisk(r.id, { dueDate: shiftDate(r.dueDate, deltaDays) })
+          );
+        }
+      }
+      setDragging(null);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+    };
+  }, [dragging, dayPx, projects, milestones]);
 
   // ── filtered rows ──────────────────────────────────────────────────────────
   const visibleProjects = projects.filter(p =>
@@ -257,6 +302,9 @@ function RoadmapView({ state }) {
     const inDownstream = !!(hoveredId && hoveredChain.down.has(proj.id));
     const isDimmed     = depsMode === 'hover' && !!hoveredId && !isHovered && !inUpstream && !inDownstream;
     const outlineColor = inUpstream ? 'var(--ok)' : inDownstream ? 'var(--warn)' : null;
+    const isDragging   = dragging?.projId === proj.id;
+    const dragOffsetPx = isDragging ? dragging.deltaX : 0;
+    const dragDays     = isDragging ? Math.round(dragging.deltaX / dayPx) : 0;
 
     return (
       <div key={proj.id} style={{ display: 'flex', height: RM.PROJ_H, alignItems: 'stretch' }}>
@@ -278,21 +326,36 @@ function RoadmapView({ state }) {
         >
           {x1 != null && barW > 0 && (
             <div
-              title={`${proj.name} · ${prog.pct}%${overdue ? ' · OVERDUE' : ''}`}
+              title={isDragging && dragDays !== 0
+                ? `${proj.name} · ${dragDays > 0 ? '+' : ''}${dragDays}d`
+                : `${proj.name} · ${prog.pct}%${overdue ? ' · OVERDUE' : ''}`}
               style={{
-                position: 'absolute', left: x1, top: barTop,
-                width: barW, height: RM.BAR_H, borderRadius: 5, overflow: 'visible', cursor: 'pointer',
+                position: 'absolute', left: x1 + dragOffsetPx, top: barTop,
+                width: barW, height: RM.BAR_H, borderRadius: 5, overflow: 'visible',
+                cursor: isDragging ? 'grabbing' : 'grab',
                 background: `color-mix(in oklch, ${color} 28%, transparent)`,
                 border: `1px solid color-mix(in oklch, ${color} 55%, transparent)`,
-                boxShadow: onCP
-                  ? `0 0 0 2px var(--danger), inset 0 0 0 1px color-mix(in oklch, var(--danger) 30%, transparent)`
-                  : outlineColor
-                    ? `0 0 0 2px ${outlineColor}`
-                    : overdue
-                      ? `0 0 0 1.5px var(--danger)`
-                      : 'none',
+                opacity: isDragging ? 0.85 : 1,
+                transition: isDragging ? 'none' : 'opacity 150ms',
+                boxShadow: isDragging
+                  ? `0 4px 16px rgba(0,0,0,0.3), 0 0 0 2px ${color}`
+                  : onCP
+                    ? `0 0 0 2px var(--danger), inset 0 0 0 1px color-mix(in oklch, var(--danger) 30%, transparent)`
+                    : outlineColor
+                      ? `0 0 0 2px ${outlineColor}`
+                      : overdue
+                        ? `0 0 0 1.5px var(--danger)`
+                        : 'none',
               }}
-              onClick={() => actions.setMeta({ activeView: 'project', activeProjectId: proj.id })}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                didDragRef.current = false;
+                setDragging({ projId: proj.id, startX: e.clientX, deltaX: 0 });
+              }}
+              onClick={() => {
+                if (didDragRef.current) { didDragRef.current = false; return; }
+                actions.setMeta({ activeView: 'project', activeProjectId: proj.id });
+              }}
             >
               {/* Clipping container for progress fill (no overflow visible inside) */}
               <div style={{ position: 'absolute', inset: 0, borderRadius: 4, overflow: 'hidden' }}>
@@ -326,6 +389,17 @@ function RoadmapView({ state }) {
                 )}
               </div>
 
+              {/* Drag delta indicator */}
+              {isDragging && dragDays !== 0 && (
+                <div style={{
+                  position: 'absolute', left: '50%', top: -20, transform: 'translateX(-50%)',
+                  background: 'var(--bg)', border: '1px solid var(--line)',
+                  fontSize: 9.5, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  color: dragDays > 0 ? 'var(--warn)' : 'var(--ok)',
+                  padding: '1px 6px', borderRadius: 4, whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 10,
+                }}>{dragDays > 0 ? '+' : ''}{dragDays}d</div>
+              )}
+
               {/* Milestone diamonds — at top of bar */}
               {projMs.map(m => {
                 const mx = dateToX(m.date);
@@ -334,7 +408,7 @@ function RoadmapView({ state }) {
                 if (relX < -4 || relX > barW + 4) return null;
                 const done = m.status === 'done';
                 return (
-                  <div key={m.id} title={m.title} style={{
+                  <div key={m.id} title={m.name} style={{
                     position: 'absolute',
                     left: relX - RM.MS_H / 2,
                     top: -RM.MS_H / 2 + 1,
@@ -357,7 +431,7 @@ function RoadmapView({ state }) {
             if (x1 != null && mx >= x1 - 4 && mx <= x1 + barW + 4) return null;
             const done = m.status === 'done';
             return (
-              <div key={`ext-${m.id}`} title={m.title} style={{
+              <div key={`ext-${m.id}`} title={m.name} style={{
                 position: 'absolute', left: mx - RM.MS_H / 2, top: barTop - RM.MS_H / 2 + 1,
                 transform: 'rotate(45deg)', width: RM.MS_H, height: RM.MS_H,
                 borderRadius: 1.5, background: done ? RM.MS_DONE : RM.MS_CLR,
@@ -398,6 +472,7 @@ function RoadmapView({ state }) {
           let opacity = 0, stroke = 'color-mix(in oklch, var(--fg-3) 55%, transparent)', dash = '5 3', markerId = 'n', strokeW = 1.5;
 
           if (isViolation) {
+            if (!showViolations) return null;
             opacity = 1; stroke = 'var(--danger)'; dash = '0'; markerId = 'danger'; strokeW = 2;
           } else if (depsMode === 'always') {
             opacity = 0.45;
@@ -454,7 +529,7 @@ function RoadmapView({ state }) {
       <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
-            <div className="title-h1">Program roadmap</div>
+            <div className="title-h1">Project roadmap</div>
             <div className="title-sub">
               {allActive.length} active project{allActive.length !== 1 ? 's' : ''} across {activePgCount} program{activePgCount !== 1 ? 's' : ''}
               <span style={{ marginLeft: 10, fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--fg-4)' }}>{rangeStr}</span>
@@ -496,14 +571,18 @@ function RoadmapView({ state }) {
         {programs.length > 0 && (
           <div className="rm-filter-group">
             <button className={`btn btn-sm${!programFilter ? ' btn-primary' : ''}`} style={{ fontSize: 11 }} onClick={() => setFilter(null)}>All</button>
-            {programs.map(pg => (
-              <button key={pg.id} className={`btn btn-sm${programFilter === pg.id ? ' btn-primary' : ''}`}
-                style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-                onClick={() => setFilter(programFilter === pg.id ? null : pg.id)}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-                {pg.name}{programFilter === pg.id && <span style={{ opacity: 0.6, marginLeft: 1 }}>×</span>}
-              </button>
-            ))}
+            {programs.map(pg => {
+              const code = pg.name.split('.')[0]; // "P1", "P2", etc.
+              return (
+                <button key={pg.id} className={`btn btn-sm${programFilter === pg.id ? ' btn-primary' : ''}`}
+                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+                  title={pg.name}
+                  onClick={() => setFilter(programFilter === pg.id ? null : pg.id)}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+                  {code}{programFilter === pg.id && <span style={{ opacity: 0.6, marginLeft: 1 }}>×</span>}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -516,6 +595,12 @@ function RoadmapView({ state }) {
             style={{ fontSize: 11 }} onClick={() => setShowCP(v => !v)}>
             — Critical path
           </button>
+          {violations.size > 0 && (
+            <button className={`btn btn-sm${showViolations ? ' btn-primary' : ''}`}
+              style={{ fontSize: 11 }} onClick={() => setShowViol(v => !v)}>
+              ⚠ Violations
+            </button>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>DEPS</span>
             <div className="rm-seg">
@@ -538,7 +623,7 @@ function RoadmapView({ state }) {
             <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', marginLeft: 'auto' }}>↓ Start</span>
           </div>
           <div style={{ flex: 1, position: 'relative', minWidth: totalWidth, height: RM.HDR_H }}>
-            <div style={{ position: 'absolute', left: todayX, top: 0, bottom: 0, width: Math.max(dayPx, 2), background: 'color-mix(in oklch, var(--danger) 8%, transparent)', pointerEvents: 'none', zIndex: 0 }} />
+            <div style={{ position: 'absolute', left: todayX, top: 0, bottom: 0, width: Math.max(dayPx, 2), background: 'color-mix(in oklch, var(--accent) 8%, transparent)', pointerEvents: 'none', zIndex: 0 }} />
             {h1.map((seg, i) => (
               <div key={i} style={{
                 position: 'absolute', left: Math.max(0, seg.x), top: 0, height: RM.HDR_H / 2,
@@ -558,10 +643,10 @@ function RoadmapView({ state }) {
               }}>{tick.label}</div>
             ))}
             {/* TODAY pill */}
-            <div style={{ position: 'absolute', left: todayX, top: 0, bottom: 0, width: 2, background: 'var(--danger)', zIndex: 2 }}>
+            <div style={{ position: 'absolute', left: todayX, top: 0, bottom: 0, width: 2, background: 'var(--accent)', zIndex: 2 }}>
               <div style={{
                 position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)',
-                background: 'var(--danger)', color: '#fff',
+                background: 'var(--accent)', color: '#fff',
                 fontSize: 8.5, fontFamily: 'var(--font-mono)', fontWeight: 700,
                 letterSpacing: '0.06em', padding: '2px 6px', borderRadius: 4,
                 whiteSpace: 'nowrap', lineHeight: 1.6, boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
@@ -578,8 +663,8 @@ function RoadmapView({ state }) {
           {h2.map((tick, i) => (
             <div key={`h2g-${i}`} style={{ position: 'absolute', left: RM.LABEL_W + tick.x, top: 0, bottom: 0, width: 1, background: `color-mix(in oklch, var(--line) ${tick.weekend ? 32 : 45}%, transparent)`, pointerEvents: 'none', zIndex: 0 }} />
           ))}
-          <div style={{ position: 'absolute', left: RM.LABEL_W + todayX, top: 0, bottom: 0, width: Math.max(dayPx, 2), background: 'color-mix(in oklch, var(--danger) 5%, transparent)', pointerEvents: 'none', zIndex: 0 }} />
-          <div style={{ position: 'absolute', left: RM.LABEL_W + todayX, top: 0, bottom: 0, width: 2, background: 'color-mix(in oklch, var(--danger) 65%, transparent)', pointerEvents: 'none', zIndex: 1 }} />
+          <div style={{ position: 'absolute', left: RM.LABEL_W + todayX, top: 0, bottom: 0, width: Math.max(dayPx, 2), background: 'color-mix(in oklch, var(--accent) 5%, transparent)', pointerEvents: 'none', zIndex: 0 }} />
+          <div style={{ position: 'absolute', left: RM.LABEL_W + todayX, top: 0, bottom: 0, width: 2, background: 'color-mix(in oklch, var(--accent) 65%, transparent)', pointerEvents: 'none', zIndex: 1 }} />
 
           {rows.map((row, idx) => {
             if (row.type === 'divider') return (
@@ -618,7 +703,7 @@ function RoadmapView({ state }) {
           <span style={{ width: 7, height: 7, background: 'oklch(65% 0.10 280)', display: 'inline-block', transform: 'rotate(45deg)', borderRadius: 1, flexShrink: 0 }} />Milestone
         </span>
         <span className="rm-leg-item">
-          <svg width="18" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="var(--danger)" strokeWidth="2" /></svg>Today
+          <svg width="18" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="var(--accent)" strokeWidth="2" /></svg>Today
         </span>
         <span className="rm-leg-item">
           <svg width="18" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="var(--danger)" strokeWidth="1.5" strokeDasharray="5 2" /></svg>Critical path
