@@ -6,11 +6,11 @@ function App() {
   const [showQuickTask, setShowQuickTask] = React.useState(false);
   const [tweaksOpen, setTweaksOpen] = React.useState(false);
   const [topSearchQ, setTopSearchQ] = React.useState('');
-  const [sbDoneOpen, setSbDoneOpen] = React.useState(false);
   const [newProjInput, setNewProjInput] = React.useState(null); // null | { name, code }
   const [newProgInput, setNewProgInput] = React.useState(false);
   const [collapsedPrograms, setCollapsedPrograms] = React.useState({});
   const [editingProgram, setEditingProgram] = React.useState(null); // null | { id, name, description }
+  const [navHistory, setNavHistory] = React.useState([]); // [{view, projectId}]
 
   // Apply theme + density to <body>
   React.useEffect(() => {
@@ -38,21 +38,45 @@ function App() {
     }
   }, []);
 
+  // Close the + dropdown when clicking outside
+  React.useEffect(() => {
+    if (newProjInput !== '__menu__') return;
+    const onDown = (e) => {
+      if (!e.target.closest('[data-sb-new-menu]')) setNewProjInput(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [newProjInput]);
+
   // Helper for sub-components to call navigation actions via window.actions
   React.useEffect(() => {
     window.actions.setActiveView = (view, opts = {}) => {
+      setNavHistory((h) => [...h, { view: state.meta.activeView, projectId: state.meta.activeProjectId }]);
       actions.setMeta({ activeView: view, ...(opts.pageId ? { _openPageId: opts.pageId } : {}) });
     };
     window.actions.setActiveProject = (id) => {
+      setNavHistory((h) => [...h, { view: state.meta.activeView, projectId: state.meta.activeProjectId }]);
       actions.setMeta({ activeView: 'project', activeProjectId: id });
     };
     window.actions.openTask = (id) => setTaskModalId(id);
-  }, []);
+  }, [state.meta.activeView, state.meta.activeProjectId]);
 
   const setView = (view, projectId) => {
+    setNavHistory((h) => [...h, { view: state.meta.activeView, projectId: state.meta.activeProjectId }]);
     const patch = { activeView: view };
     if (projectId) patch.activeProjectId = projectId;
     actions.setMeta(patch);
+  };
+
+  const goBack = () => {
+    setNavHistory((h) => {
+      if (!h.length) return h;
+      const prev = h[h.length - 1];
+      const patch = { activeView: prev.view };
+      if (prev.projectId) patch.activeProjectId = prev.projectId;
+      actions.setMeta(patch);
+      return h.slice(0, -1);
+    });
   };
 
   const activeProject = state.projects.find((p) => p.id === state.meta.activeProjectId);
@@ -61,7 +85,7 @@ function App() {
   // Action-needed sidebar counts only
   const todayActionCount = todayTasks(state).filter((t) => t._due !== null && t._due <= 0).length;
   const staleCount = staleProjects(state, 10).length;
-  const critRiskCount = (state.risks || []).filter((r) => r.status !== 'closed' && r.severity * r.likelihood >= 12).length;
+  const critRiskCount = (state.risks || []).filter((r) => r.status !== 'closed' && r.status !== 'cancelled' && r.severity * r.likelihood >= 12).length;
 
   // Drag-to-reorder nav tabs
   const DEFAULT_TAB_ORDER = ['today', 'portfolio', 'roadmap', 'calendar', 'meetings', 'tasks', 'decisions', 'questions', 'risks', 'review'];
@@ -78,7 +102,7 @@ function App() {
     tasks:     { label: 'Tasks',        icon: 'check',    hint: () => { const c = (state.tasks || []).filter((t) => t.status !== 'done').length; return c > 0 ? { count: c } : null; } },
     decisions: { label: 'Decisions',    icon: 'note',     hint: () => null },
     questions: { label: 'Questions',    icon: 'search',   hint: () => { const c = (state.notes || []).filter((n) => n.kind === 'question' && !n.resolved).length; return c > 0 ? { count: c } : null; } },
-    risks:     { label: 'Risks',        icon: 'warn',     hint: () => { const c = (state.risks || []).filter((r) => r.status !== 'closed').length; return c > 0 ? { count: c } : null; } },
+    risks:     { label: 'Risks',        icon: 'warn',     hint: () => { const c = (state.risks || []).filter((r) => r.status !== 'closed' && r.status !== 'cancelled').length; return c > 0 ? { count: c } : null; } },
     review:    { label: 'Weekly review',icon: 'bolt',     hint: () => null },
   };
 
@@ -167,27 +191,40 @@ function App() {
         )}
 
         <div className="sb-section">
-          <span>Projects</span>
-          <span className="sb-section-count" style={{ marginLeft: 5 }}>{state.projects.filter((p) => p.status !== 'done').length}</span>
+          <span>Open Projects</span>
+          <span className="sb-section-count" style={{ marginLeft: 5 }}>{state.projects.filter((p) => p.status !== 'done' && p.status !== 'closed').length}</span>
+          <div style={{ position: 'relative', marginLeft: 'auto' }} data-sb-new-menu>
+            <button className="icon-btn" style={{ width: 20, height: 20 }} title="New project or program"
+              onClick={() => setNewProjInput(prev => prev === '__menu__' ? null : '__menu__')}>
+              <Icon name="plus" size={11} />
+            </button>
+            {newProjInput === '__menu__' && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 200, background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)', minWidth: 160, padding: '4px 0' }}>
+                <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '6px 14px', fontSize: 12 }}
+                  onClick={() => setNewProjInput({ name: '', code: '', programId: null })}>
+                  <Icon name="plus" size={10} /> New project
+                </button>
+                <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '6px 14px', fontSize: 12 }}
+                  onClick={() => { setNewProjInput(null); setNewProgInput(true); }}>
+                  <Icon name="folder" size={10} /> New program
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {(() => {
             const programs = state.programs || [];
             const byPrio = (arr) => arr.slice().sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
-            const allActive = byPrio(state.projects.filter((p) => p.status !== 'done'));
-            const doneProjs = byPrio(state.projects.filter((p) => p.status === 'done'));
+            const allActive = byPrio(state.projects.filter((p) => p.status !== 'done' && p.status !== 'closed'));
 
             const renderProj = (p) => {
-              const prog = projectProgress(state, p.id);
-              const risk = projectRiskScore(state, p.id);
               const active = state.meta.activeView === 'project' && state.meta.activeProjectId === p.id;
               return (
-                <button key={p.id} className={`sb-proj ${active ? 'active' : ''} ${p.status === 'done' ? 'sb-proj-done' : ''}`} onClick={() => setView('project', p.id)}>
+                <button key={p.id} className={`sb-proj ${active ? 'active' : ''} ${(p.status === 'done' || p.status === 'closed') ? 'sb-proj-done' : ''}`} onClick={() => setView('project', p.id)}>
                   <span className={`sb-proj-dot pc-${p.status}`} />
                   <span className="sb-proj-code">{p.code}</span>
                   <span className="sb-proj-name truncate">{p.name.split('—')[1]?.trim() || p.name}</span>
-                  <span className="sb-proj-meta">{prog.pct}%</span>
-                  {risk.peak >= 12 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)', flexShrink: 0 }} />}
                 </button>
               );
             };
@@ -225,8 +262,8 @@ function App() {
 
             return (
               <>
-                {/* Program groups */}
-                {programs.map((pg) => {
+                {/* Program groups — only active programs */}
+                {programs.filter(pg => pg.status !== 'done' && pg.status !== 'closed').map((pg) => {
                   const pgProjs = allActive.filter((p) => p.programId === pg.id);
                   const collapsed = collapsedPrograms[pg.id];
                   const isEditing = editingProgram?.id === pg.id;
@@ -290,21 +327,7 @@ function App() {
                 {ungrouped.map(renderProj)}
 
                 {/* New project form (ungrouped) */}
-                {newProjInput && newProjInput.programId == null && <NewProjForm indented={false} />}
-
-                {/* Ghost action buttons */}
-                {!newProjInput && !newProgInput && (
-                  <button className="sb-ghost-btn" onClick={() => setNewProjInput({ name: '', code: '', programId: null })}>
-                    <Icon name="plus" size={11} />
-                    New project
-                  </button>
-                )}
-                {!newProgInput && !newProjInput && (
-                  <button className="sb-ghost-btn" onClick={() => setNewProgInput(true)}>
-                    <Icon name="folder" size={11} />
-                    New program
-                  </button>
-                )}
+                {newProjInput && newProjInput !== '__menu__' && newProjInput.programId == null && <NewProjForm indented={false} />}
 
                 {/* New program form */}
                 {newProgInput && (
@@ -326,16 +349,6 @@ function App() {
                   </form>
                 )}
 
-                {/* Done projects */}
-                {doneProjs.length > 0 && (
-                  <>
-                    <button className="sb-proj sb-proj-done-toggle" onClick={() => setSbDoneOpen((x) => !x)}>
-                      <Icon name={sbDoneOpen ? 'chevronD' : 'chevronR'} size={9} />
-                      <span className="sb-proj-name" style={{ color: 'var(--fg-4)', fontSize: 10.5 }}>Done ({doneProjs.length})</span>
-                    </button>
-                    {sbDoneOpen && doneProjs.map(renderProj)}
-                  </>
-                )}
               </>
             );
           })()}
@@ -360,6 +373,11 @@ function App() {
         <div className="topbar">
           <div className="topbar-left">
             <div className="crumbs">
+              {navHistory.length > 0 && (
+                <button className="btn btn-ghost btn-sm" onClick={goBack} title="Go back" style={{ marginRight: 4, padding: '3px 7px' }}>
+                  <Icon name="chevronL" size={11} />
+                </button>
+              )}
               {state.meta.activeView === 'today' && <strong>Today <span style={{ fontWeight: 400, color: 'var(--fg-4)' }}>· {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></strong>}
               {state.meta.activeView === 'portfolio' && <strong>Portfolio</strong>}
               {state.meta.activeView === 'roadmap' && <strong>Roadmap</strong>}

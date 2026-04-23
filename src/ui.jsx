@@ -50,12 +50,13 @@ const PROJECT_STATUS_LABEL = {
   'on-track': 'On track',
   'at-risk': 'At risk',
   blocked: 'Blocked',
-  done: 'Done',
+  done: 'Completed',
+  closed: 'Closed',
 };
 
 // --- Computed selectors ---
 function projectProgress(state, projectId) {
-  const tasks = state.tasks.filter((t) => t.projectId === projectId);
+  const tasks = state.tasks.filter((t) => t.projectId === projectId && t.status !== 'cancelled');
   if (!tasks.length) return { pct: 0, done: 0, total: 0 };
   const done = tasks.filter((t) => t.status === 'done').length;
   return { pct: Math.round((done / tasks.length) * 100), done, total: tasks.length };
@@ -71,7 +72,7 @@ function projectRiskScore(state, projectId) {
 
 function todayTasks(state, limit = null) {
   const list = state.tasks
-    .filter((t) => t.status !== 'done')
+    .filter((t) => t.status !== 'done' && t.status !== 'cancelled')
     .map((t) => {
       const due = daysFromToday(t.dueDate);
       const priority = PRIORITY_ORDER[t.priority] ?? 2;
@@ -92,7 +93,7 @@ function workloadByDay(state, days = 14) {
   for (let i = 0; i < days; i++) {
     const d = new Date(base.getTime() + i * DAY);
     const iso = localIso(d);
-    const tasks = state.tasks.filter((t) => t.dueDate === iso && t.status !== 'done');
+    const tasks = state.tasks.filter((t) => t.dueDate === iso && t.status !== 'done' && t.status !== 'cancelled');
     const hours = tasks.reduce((acc, t) => acc + (t.estimate || 1), 0);
     buckets.push({ date: iso, day: d, tasks, hours });
   }
@@ -503,6 +504,101 @@ function dependentTasks(state, taskId) {
   return state.tasks.filter((t) => (t.dependsOn || []).includes(taskId));
 }
 
+function ProjectFilterDropdown({ programs, projects, selectedIds, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const isAllSelected = selectedIds.size === 0;
+  const toggle = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onChange(next);
+  };
+
+  const progs = programs || [];
+  const standaloneProjs = (projects || []).filter(p => !p.programId || !progs.some(pg => pg.id === p.programId));
+
+  const filterLabel = isAllSelected
+    ? 'All projects'
+    : (() => {
+        const parts = [];
+        progs.forEach(pg => { if (selectedIds.has(pg.id)) parts.push(pg.name.replace(/^P\d+\.\s*/, '')); });
+        standaloneProjs.forEach(p => { if (selectedIds.has(p.id)) parts.push(p.code); });
+        return parts.length <= 2 ? parts.join(', ') : `${parts.slice(0, 2).join(', ')} +${parts.length - 2}`;
+      })();
+
+  const Checkbox = ({ checked }) => (
+    <span style={{ width: 14, height: 14, borderRadius: 3, border: '1.5px solid var(--line)', background: checked ? 'var(--accent)' : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      {checked && <Icon name="check" size={9} style={{ color: '#fff' }} />}
+    </span>
+  );
+
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }} ref={ref}>
+      <button
+        className={`btn btn-sm${!isAllSelected ? ' btn-primary' : ''}`}
+        style={{ fontSize: 11, gap: 5 }}
+        onClick={() => setOpen(v => !v)}
+      >
+        <Icon name="filter" size={10} />
+        {filterLabel}
+        <Icon name={open ? 'chevronD' : 'chevronR'} size={9} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 200,
+          background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.18)', minWidth: 220, padding: '6px 0',
+        }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 12px', borderRadius: 0, fontSize: 11, gap: 7 }}
+            onClick={() => { onChange(new Set()); setOpen(false); }}
+          >
+            <Checkbox checked={isAllSelected} />
+            All projects
+          </button>
+          {progs.length > 0 && (
+            <div style={{ padding: '4px 12px 2px', fontSize: 9.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginTop: 2 }}>Programs</div>
+          )}
+          {progs.map(pg => (
+            <button key={pg.id}
+              className="btn btn-ghost btn-sm"
+              style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 12px', borderRadius: 0, fontSize: 11, gap: 7 }}
+              onClick={() => toggle(pg.id)}
+            >
+              <Checkbox checked={selectedIds.has(pg.id)} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+              {pg.name}
+            </button>
+          ))}
+          {standaloneProjs.length > 0 && (
+            <div style={{ padding: '4px 12px 2px', fontSize: 9.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginTop: 2 }}>Projects</div>
+          )}
+          {standaloneProjs.map(p => (
+            <button key={p.id}
+              className="btn btn-ghost btn-sm"
+              style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 12px', borderRadius: 0, fontSize: 11, gap: 7 }}
+              onClick={() => toggle(p.id)}
+            >
+              <Checkbox checked={selectedIds.has(p.id)} />
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', flexShrink: 0 }}>{p.code}</span>
+              <span className="truncate" style={{ fontSize: 11 }}>{p.name.split('—')[1]?.trim() || p.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 Object.assign(window, {
   DAY,
   parseDate,
@@ -541,4 +637,5 @@ Object.assign(window, {
   yesterdayRecap,
   blockingDeps,
   dependentTasks,
+  ProjectFilterDropdown,
 });

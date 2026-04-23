@@ -118,14 +118,16 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const [tab, setTab] = React.useState('overview');
   const [addingTask, setAddingTask] = React.useState(false);
   const [readOnlyTaskId, setReadOnlyTaskId] = React.useState(null);
+  const [closeConfirming, setCloseConfirming] = React.useState(false);
+  const [completionBlocker, setCompletionBlocker] = React.useState(null);
 
   if (!project) return <EmptyState title="Project not found" />;
 
   const tasks = state.tasks.filter((t) => t.projectId === projectId);
-  const openTasks = tasks.filter((t) => t.status !== 'done');
-  const milestones = state.milestones.filter((m) => m.projectId === projectId).sort((a, b) => a.date.localeCompare(b.date));
+  const openTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
   const notes = state.notes.filter((n) => n.projectId === projectId && n.kind !== 'artifact');
   const artifacts = state.notes.filter((n) => n.projectId === projectId && n.kind === 'artifact');
+  const milestones = state.milestones.filter((m) => m.projectId === projectId);
   const risks = state.risks.filter((r) => r.projectId === projectId);
   const meetings = (state.meetings || []).filter((m) => (m.projectIds || []).includes(projectId)).sort((a, b) => b.date.localeCompare(a.date));
   const prog = projectProgress(state, projectId);
@@ -134,10 +136,10 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const TAB_DEFS = [
     { id: 'overview',   label: 'Overview',   icon: 'target' },
     { id: 'tasks',      label: 'Tasks',      icon: 'list',     count: openTasks.length },
-    { id: 'milestones', label: 'Milestones', icon: 'flag',     count: milestones.filter((m) => m.status !== 'done').length },
+    { id: 'milestones', label: 'Milestones', icon: 'flag',     count: milestones.filter((m) => m.status !== 'done' && m.status !== 'cancelled').length },
     { id: 'notes',      label: 'Notes',      icon: 'note',     count: notes.length },
     { id: 'artifacts',  label: 'Artifacts',  icon: 'link',     count: artifacts.length },
-    { id: 'risks',      label: 'Risks',      icon: 'warn',     count: risks.filter((r) => r.status !== 'closed').length },
+    { id: 'risks',      label: 'Risks',      icon: 'warn',     count: risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').length },
     { id: 'meetings',   label: 'Meetings',   icon: 'clock',    count: meetings.length },
   ];
   const DEFAULT_PROJECT_TAB_ORDER = TAB_DEFS.map((t) => t.id);
@@ -181,17 +183,30 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
               style={{ padding: '2px 6px', fontSize: 11 }}
               value={project.status}
               onChange={(e) => {
-                const patch = { status: e.target.value };
-                if (e.target.value === 'done' && !project.completedDate) {
-                  patch.completedDate = new Date().toISOString().slice(0, 10);
+                const newStatus = e.target.value;
+                if (newStatus === 'closed') {
+                  if (project.status !== 'closed') setCloseConfirming(true);
+                  return;
                 }
-                actions.updateProject(project.id, patch);
+                if (newStatus === 'done') {
+                  const blockTasks = state.tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'cancelled');
+                  const blockMs = state.milestones.filter(m => m.projectId === project.id && m.status !== 'done' && m.status !== 'cancelled');
+                  const blockQs = state.notes.filter(n => n.projectId === project.id && n.kind === 'question' && !n.resolved);
+                  if (blockTasks.length || blockMs.length || blockQs.length) {
+                    setCompletionBlocker({ tasks: blockTasks, milestones: blockMs, questions: blockQs });
+                    return;
+                  }
+                  actions.updateProject(project.id, { status: 'done', completedDate: new Date().toISOString().slice(0, 10) });
+                  return;
+                }
+                actions.updateProject(project.id, { status: newStatus });
               }}
             >
               <option value="on-track">On track</option>
               <option value="at-risk">At risk</option>
               <option value="blocked">Blocked</option>
-              <option value="done">Done ✓</option>
+              <option value="done">Completed ✓</option>
+              <option value="closed">Closed</option>
             </select>
             {(state.programs || []).length > 0 && (
               <select
@@ -336,16 +351,123 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
       {tab === 'artifacts' && <ArtifactsTab project={project} artifacts={artifacts} state={state} />}
       {tab === 'risks' && <RisksTab project={project} risks={risks} state={state} />}
       {tab === 'meetings' && <MeetingsTab project={project} meetings={meetings} state={state} />}
+
+      {/* Close project confirmation modal */}
+      {closeConfirming && (() => {
+        const cancelTasks = state.tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'cancelled');
+        const cancelMs = state.milestones.filter(m => m.projectId === project.id && m.status !== 'done' && m.status !== 'cancelled');
+        const cancelQs = state.notes.filter(n => n.projectId === project.id && n.kind === 'question' && !n.resolved);
+        return (
+          <Modal open title={`Close project: ${project.code}`} onClose={() => setCloseConfirming(false)}>
+            <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+              Closing this project will <strong>cancel all remaining items</strong>. This cannot be undone.
+            </div>
+            {cancelTasks.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 4 }}>
+                  {cancelTasks.length} task{cancelTasks.length > 1 ? 's' : ''} will be cancelled
+                </div>
+                {cancelTasks.slice(0, 5).map(t => (
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 12, color: 'var(--fg-3)' }}>
+                    <PriorityBadge priority={t.priority} />
+                    <span className="truncate">{t.title}</span>
+                  </div>
+                ))}
+                {cancelTasks.length > 5 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>…and {cancelTasks.length - 5} more</div>}
+              </div>
+            )}
+            {cancelMs.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 4 }}>
+                  {cancelMs.length} milestone{cancelMs.length > 1 ? 's' : ''} will be cancelled
+                </div>
+                {cancelMs.slice(0, 5).map(m => (
+                  <div key={m.id} style={{ fontSize: 12, color: 'var(--fg-3)', padding: '3px 0' }}>{m.name}</div>
+                ))}
+                {cancelMs.length > 5 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>…and {cancelMs.length - 5} more</div>}
+              </div>
+            )}
+            {cancelQs.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 4 }}>
+                  {cancelQs.length} open question{cancelQs.length > 1 ? 's' : ''} will be resolved
+                </div>
+                {cancelQs.slice(0, 5).map(n => (
+                  <div key={n.id} style={{ fontSize: 12, color: 'var(--fg-3)', padding: '3px 0' }}>{n.title}</div>
+                ))}
+                {cancelQs.length > 5 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>…and {cancelQs.length - 5} more</div>}
+              </div>
+            )}
+            {cancelTasks.length === 0 && cancelMs.length === 0 && cancelQs.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--fg-4)', marginBottom: 10 }}>No remaining items — this project is ready to close.</div>
+            )}
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setCloseConfirming(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={() => { actions.closeProject(project.id); setCloseConfirming(false); }}>
+                Close project
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Completion blocker modal */}
+      {completionBlocker && (
+        <Modal open title="Cannot complete project" onClose={() => setCompletionBlocker(null)}>
+          <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+            All tasks, milestones, and questions must be completed before marking this project as Completed.
+          </div>
+          {completionBlocker.tasks.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 4 }}>
+                {completionBlocker.tasks.length} incomplete task{completionBlocker.tasks.length > 1 ? 's' : ''}
+              </div>
+              {completionBlocker.tasks.slice(0, 5).map(t => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 12, color: 'var(--fg-3)' }}>
+                  <PriorityBadge priority={t.priority} />
+                  <span className="truncate">{t.title}</span>
+                </div>
+              ))}
+              {completionBlocker.tasks.length > 5 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>…and {completionBlocker.tasks.length - 5} more</div>}
+            </div>
+          )}
+          {completionBlocker.milestones.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 4 }}>
+                {completionBlocker.milestones.length} incomplete milestone{completionBlocker.milestones.length > 1 ? 's' : ''}
+              </div>
+              {completionBlocker.milestones.slice(0, 5).map(m => (
+                <div key={m.id} style={{ fontSize: 12, color: 'var(--fg-3)', padding: '3px 0' }}>{m.name}</div>
+              ))}
+              {completionBlocker.milestones.length > 5 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>…and {completionBlocker.milestones.length - 5} more</div>}
+            </div>
+          )}
+          {completionBlocker.questions.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 4 }}>
+                {completionBlocker.questions.length} open question{completionBlocker.questions.length > 1 ? 's' : ''}
+              </div>
+              {completionBlocker.questions.slice(0, 5).map(n => (
+                <div key={n.id} style={{ fontSize: 12, color: 'var(--fg-3)', padding: '3px 0' }}>{n.title}</div>
+              ))}
+              {completionBlocker.questions.length > 5 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>…and {completionBlocker.questions.length - 5} more</div>}
+            </div>
+          )}
+          <div className="modal-foot">
+            <button className="btn btn-primary" onClick={() => setCompletionBlocker(null)}>OK</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
 function OverviewTab({ project, state, milestones, tasks, onGoto }) {
-  const openTasks = tasks.filter((t) => t.status !== 'done');
+  const openTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
   const doneTasks = tasks.filter((t) => t.status === 'done');
   const topTasks = [...openTasks].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || (a.rank || 99) - (b.rank || 99)).slice(0, 5);
   const recentNotes = state.notes.filter((n) => n.projectId === project.id && n.kind !== 'artifact').slice(0, 3);
-  const openRisks = state.risks.filter((r) => r.projectId === project.id && r.status !== 'closed').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
+  const openRisks = state.risks.filter((r) => r.projectId === project.id && r.status !== 'closed' && r.status !== 'cancelled').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
   const today = new Date().toISOString().slice(0, 10);
   const upcomingMeetings = (state.meetings || [])
     .filter((m) => (m.projectIds || []).includes(project.id) && m.date >= today)
@@ -1171,8 +1293,9 @@ function RisksTab({ project, risks, state }) {
   const openModal  = (id) => { setModalId(id || null); setShowModal(true); };
   const toggleExpand = (id) => setExpandedId((prev) => prev === id ? null : id);
 
-  const open   = risks.filter((r) => r.status !== 'closed').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
+  const open   = risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood);
   const closed = risks.filter((r) => r.status === 'closed');
+  const cancelled = risks.filter((r) => r.status === 'cancelled');
 
   const critCount    = open.filter((r) => r.severity * r.likelihood >= 16).length;
   const highCount    = open.filter((r) => { const s = r.severity * r.likelihood; return s >= 10 && s < 16; }).length;
@@ -1218,7 +1341,7 @@ function RisksTab({ project, risks, state }) {
           <div className="card" style={{ padding: '16px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
               <span style={monoSm}>Risk breakdown</span>
-              <span style={{ ...monoSm, textTransform: 'none', letterSpacing: 0 }}>{risks.length} total · {open.length} open · {closed.length} closed</span>
+              <span style={{ ...monoSm, textTransform: 'none', letterSpacing: 0 }}>{risks.length} total · {open.length} open · {closed.length} closed{cancelled.length > 0 ? ` · ${cancelled.length} cancelled` : ''}</span>
             </div>
             <div style={{ marginBottom: 12 }}>
               <span style={bigNum}>{open.length}</span>
@@ -1329,7 +1452,7 @@ function RisksTab({ project, risks, state }) {
             </button>
           </div>
         </div>
-        {open.length === 0 && closed.length === 0
+        {open.length === 0 && closed.length === 0 && cancelled.length === 0
           ? <EmptyState title="No risks yet" icon="check" />
           : null}
         {open.length > 0 && open.map(renderRiskRow)}
@@ -1340,6 +1463,15 @@ function RisksTab({ project, risks, state }) {
               <span className="tgroup-head-count">{closed.length}</span>
             </div>
             {closed.map(renderRiskRow)}
+          </>
+        )}
+        {cancelled.length > 0 && (
+          <>
+            <div className="tgroup-head">
+              <span style={{ color: 'var(--fg-4)' }}>Cancelled</span>
+              <span className="tgroup-head-count">{cancelled.length}</span>
+            </div>
+            {cancelled.map(renderRiskRow)}
           </>
         )}
       </div>

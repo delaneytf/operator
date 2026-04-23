@@ -92,17 +92,22 @@ function RiskGuideModal({ onClose }) {
 // Main view
 // ---------------------------------------------------------------------------
 function RisksView({ state }) {
-  const [filterProject,   setFilterProject]   = React.useState('all');
+  const [filterIds,       setFilterIds]       = React.useState(new Set());
   const [filterStatus,    setFilterStatus]    = React.useState('all');
   const [search,          setSearch]          = React.useState('');
   const [groupBy,         setGroupBy]         = React.useState('status');
-  const [collapsed,       setCollapsed]       = React.useState({ closed: true });
+  const [collapsed,       setCollapsed]       = React.useState({ closed: true, cancelled: true });
   const [expandedId,      setExpandedId]      = React.useState(null);
   const [modalId,         setModalId]         = React.useState(null);
   const [showModal,       setShowModal]       = React.useState(false);
   const [showFieldsPanel, setShowFieldsPanel] = React.useState(false);
   const [showGuide,       setShowGuide]       = React.useState(false);
   const fieldsPanelRef = React.useRef(null);
+
+  const isAllFilter = filterIds.size === 0;
+  const visibleProjectIds = isAllFilter ? null : new Set(
+    (state.projects || []).filter(p => filterIds.has(p.programId) || filterIds.has(p.id)).map(p => p.id)
+  );
 
   const enabledFields = state.meta?.riskFields || RISK_FIELDS_DEFAULT;
 
@@ -132,18 +137,18 @@ function RisksView({ state }) {
   const allRisks = state.risks || [];
 
   const filtered = allRisks
-    .filter((r) => filterProject === 'all' || r.projectId === filterProject)
+    .filter((r) => !visibleProjectIds || visibleProjectIds.has(r.projectId))
     .filter((r) => filterStatus  === 'all' || r.status    === filterStatus)
     .filter((r) => !search || r.title.toLowerCase().includes(search.toLowerCase())
       || (r.mitigation || '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => riskScore(b) - riskScore(a));
 
   const metricOpen       = allRisks.filter((r) => r.status === 'open').length;
-  const metricCritical   = allRisks.filter((r) => r.status !== 'closed' && riskScore(r) >= 12).length;
-  const metricHigh       = allRisks.filter((r) => r.status !== 'closed' && riskScore(r) >= 6 && riskScore(r) < 12).length;
+  const metricCritical   = allRisks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled' && riskScore(r) >= 12).length;
+  const metricHigh       = allRisks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled' && riskScore(r) >= 6 && riskScore(r) < 12).length;
   const metricMonitoring = allRisks.filter((r) => r.status === 'monitoring').length;
   const metricClosed     = allRisks.filter((r) => r.status === 'closed').length;
-  const metricTotal      = allRisks.length;
+  const metricTotal      = allRisks.filter((r) => r.status !== 'cancelled').length;
 
   const metrics = [
     { label: 'Open',       value: metricOpen,       color: metricOpen > 0       ? 'var(--warn)'   : 'var(--fg-4)' },
@@ -160,18 +165,22 @@ function RisksView({ state }) {
       { key: 'open',       label: 'Open',       labelColor: 'var(--warn)' },
       { key: 'monitoring', label: 'Monitoring', labelColor: 'var(--info)' },
       { key: 'closed',     label: 'Closed',     labelColor: 'var(--ok)', defaultCollapsed: true },
+      { key: 'cancelled',  label: 'Cancelled',  labelColor: 'var(--fg-4)', defaultCollapsed: true },
     ];
     sections = defs
       .map((g) => ({ ...g, items: filtered.filter((r) => r.status === g.key) }))
       .filter((g) => g.items.length > 0);
   } else {
-    const critical = filtered.filter((r) => riskScore(r) >= 12);
-    const high     = filtered.filter((r) => riskScore(r) >= 6 && riskScore(r) < 12);
-    const low      = filtered.filter((r) => riskScore(r) < 6);
+    const active = filtered.filter((r) => r.status !== 'cancelled');
+    const critical = active.filter((r) => riskScore(r) >= 12);
+    const high     = active.filter((r) => riskScore(r) >= 6 && riskScore(r) < 12);
+    const low      = active.filter((r) => riskScore(r) < 6);
+    const cancelledItems = filtered.filter((r) => r.status === 'cancelled');
     sections = [];
     if (critical.length) sections.push({ key: 'critical', label: 'Critical (≥12)', labelColor: 'var(--danger)', items: critical });
     if (high.length)     sections.push({ key: 'high',     label: 'High (6–11)',    labelColor: 'var(--warn)',   items: high });
     if (low.length)      sections.push({ key: 'low',      label: 'Low (<6)',       labelColor: 'var(--fg-4)',   items: low });
+    if (cancelledItems.length) sections.push({ key: 'cancelled', label: 'Cancelled', labelColor: 'var(--fg-4)', items: cancelledItems, defaultCollapsed: true });
   }
 
   React.useEffect(() => {
@@ -249,22 +258,16 @@ function RisksView({ state }) {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
         <input className="input" placeholder="Search risks…" value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ fontSize: 12, width: 200, flexShrink: 0 }} />
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
-          {[['all', 'All'], ['open', 'Open'], ['monitoring', 'Monitoring'], ['closed', 'Closed']].map(([v, l]) => (
-            <button key={v} className={`btn btn-sm${filterStatus === v ? ' btn-primary' : ''}`} onClick={() => setFilterStatus(v)}>{l}</button>
-          ))}
-          <span style={{ width: 1, background: 'var(--line)', margin: '0 2px', alignSelf: 'stretch' }} />
-          <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All projects</button>
-          {state.projects.map((p) => (
-            <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
-              onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
-              {p.code}
-            </button>
-          ))}
-        </div>
+        <ProjectFilterDropdown
+          programs={state.programs || []}
+          projects={state.projects || []}
+          selectedIds={filterIds}
+          onChange={setFilterIds}
+        />
+        <div style={{ flex: 1 }} />
         <div className="seg" style={{ flexShrink: 0 }}>
           <button type="button" className={`seg-btn${groupBy === 'status'   ? ' active' : ''}`} onClick={() => setGroupBy('status')}>Status</button>
           <button type="button" className={`seg-btn${groupBy === 'severity' ? ' active' : ''}`} onClick={() => setGroupBy('severity')}>Severity</button>
@@ -296,7 +299,7 @@ function RisksView({ state }) {
 
     {showModal && (
       <RiskModal riskId={modalId} state={state}
-        defaults={{ projectId: filterProject !== 'all' ? filterProject : undefined }}
+        defaults={{ projectId: visibleProjectIds?.size === 1 ? [...visibleProjectIds][0] : undefined }}
         onClose={() => { setShowModal(false); setModalId(null); }} />
     )}
     {showGuide && <RiskGuideModal onClose={() => setShowGuide(false)} />}
@@ -379,7 +382,7 @@ function RiskRow({ risk, project, expanded, onToggleExpand, onEdit, enabledField
 
         {/* Status */}
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span className={`pill${risk.status === 'closed' ? ' pill-ok' : risk.status === 'monitoring' ? ' pill-info' : ' pill-warn'}`}
+          <span className={`pill${risk.status === 'closed' ? ' pill-ok' : risk.status === 'monitoring' ? ' pill-info' : risk.status === 'cancelled' ? ' pill-ghost' : ' pill-warn'}`}
             style={{ fontSize: 10, padding: '1px 7px' }}>
             {risk.status}
           </span>

@@ -22,7 +22,7 @@ const STATUS_CLR = {
 
 function RoadmapView({ state }) {
   const [zoom, setZoom]            = React.useState('month');
-  const [programFilter, setFilter] = React.useState(null);
+  const [selectedIds, setSelectedIds] = React.useState(new Set()); // empty = all
   const [collapsed, setCollapsed]  = React.useState({});
   const [showMilestones, setShowMs]     = React.useState(true);
   const [showCritPath, setShowCP]       = React.useState(false);
@@ -31,11 +31,14 @@ function RoadmapView({ state }) {
   const [hoveredId, setHoveredId]       = React.useState(null);
   const [ganttScroll, setGanttScroll]   = React.useState(0);
   const [dragging, setDragging]         = React.useState(null); // { projId, startX, deltaX }
+  const [selectedMilestoneId, setSelectedMilestoneId] = React.useState(null);
   const didDragRef                      = React.useRef(false);
   const bodyRef = React.useRef(null);
 
-  const programs   = state.programs  || [];
-  const projects   = state.projects  || [];
+  const allPrograms = state.programs  || [];
+  const allProjects = state.projects  || [];
+  const programs   = allPrograms.filter(pg => pg.status !== 'done' && pg.status !== 'closed');
+  const projects   = allProjects.filter(p  => p.status  !== 'done' && p.status  !== 'closed');
   const milestones = state.milestones || [];
 
   // ── geometry ──────────────────────────────────────────────────────────────
@@ -91,23 +94,29 @@ function RoadmapView({ state }) {
   }, [dragging, dayPx, projects, milestones]);
 
   // ── filtered rows ──────────────────────────────────────────────────────────
-  const visibleProjects = projects.filter(p =>
-    !programFilter || p.programId === programFilter
-  );
+  // selectedIds contains programIds and/or standalone projectIds; empty = show all
+  const isAllSelected = selectedIds.size === 0;
+
+  const visibleProjects = projects.filter(p => {
+    if (isAllSelected) return true;
+    if (p.programId && selectedIds.has(p.programId)) return true;
+    if (!p.programId && selectedIds.has(p.id)) return true;
+    return false;
+  });
 
   const rows = [];
   const assignedIds = new Set();
 
   for (const pg of programs) {
-    if (programFilter && pg.id !== programFilter) continue;
     const pgProjs = visibleProjects.filter(p => p.programId === pg.id);
+    if (pgProjs.length === 0 && !isAllSelected) continue;
     rows.push({ type: 'program', pg, pgProjs });
     pgProjs.forEach(p => assignedIds.add(p.id));
     if (!collapsed[pg.id]) pgProjs.forEach(p => rows.push({ type: 'project', proj: p }));
   }
   const ungrouped = visibleProjects.filter(p => !assignedIds.has(p.id));
   if (ungrouped.length > 0) {
-    if (programs.length > 0 && !programFilter) rows.push({ type: 'divider' });
+    if (programs.length > 0) rows.push({ type: 'divider' });
     ungrouped.forEach(p => rows.push({ type: 'project', proj: p }));
   }
 
@@ -129,30 +138,30 @@ function RoadmapView({ state }) {
   const criticalPath = React.useMemo(() => {
     const cp = new Set(), memo = {};
     const daysOf = (id) => {
-      const p = projects.find(x => x.id === id);
+      const p = visibleProjects.find(x => x.id === id);
       return (!p || !p.startDate || !p.dueDate) ? 0
         : Math.max(0, (new Date(p.dueDate) - new Date(p.startDate)) / 86400000);
     };
     const longest = (id, seen = new Set()) => {
       if (memo[id] !== undefined) return memo[id];
       if (seen.has(id)) return 0;
-      const deps = projects.find(p => p.id === id)?.dependsOn || [];
+      const deps = visibleProjects.find(p => p.id === id)?.dependsOn || [];
       const self = daysOf(id);
       if (!deps.length) return (memo[id] = self);
       return (memo[id] = self + Math.max(...deps.map(d => longest(d, new Set([...seen, id])))));
     };
     let maxLen = 0, endNode = null;
-    projects.forEach(p => { const l = longest(p.id); if (l > maxLen) { maxLen = l; endNode = p.id; } });
+    visibleProjects.forEach(p => { const l = longest(p.id); if (l > maxLen) { maxLen = l; endNode = p.id; } });
     if (!endNode || maxLen === 0) return cp;
     const trace = (id) => {
       cp.add(id);
-      const deps = projects.find(p => p.id === id)?.dependsOn || [];
+      const deps = visibleProjects.find(p => p.id === id)?.dependsOn || [];
       if (!deps.length) return;
       trace(deps.reduce((b, d) => longest(d) > longest(b) ? d : b, deps[0]));
     };
     trace(endNode);
     return cp;
-  }, [projects]);
+  }, [visibleProjects]);
 
   // ── successors map & violations ────────────────────────────────────────────
   const successors = React.useMemo(() => {
@@ -171,6 +180,43 @@ function RoadmapView({ state }) {
     return v;
   }, [projects]);
 
+  // ── critical path chain (start → end order) ───────────────────────────────
+  const cpChain = React.useMemo(() => {
+    if (criticalPath.size === 0) return [];
+    const cpArr = [...criticalPath]; // Set insertion order = end → start
+    // Find the start node: a CP node whose predecessors are not in CP
+    const start = cpArr.find(id => {
+      const deps = visibleProjects.find(p => p.id === id)?.dependsOn || [];
+      return !deps.some(d => criticalPath.has(d));
+    }) || cpArr[cpArr.length - 1];
+    // Walk forward through successors that are in CP
+    const chain = [];
+    let cur = start;
+    const visited = new Set();
+    while (cur && !visited.has(cur)) {
+      chain.push(cur);
+      visited.add(cur);
+      cur = cpArr.find(id => {
+        const p = visibleProjects.find(x => x.id === id);
+        return (p?.dependsOn || []).includes(cur) && criticalPath.has(id);
+      });
+    }
+    return chain;
+  }, [criticalPath, visibleProjects]);
+
+  // ── violation pairs (avoids parsing hyphenated IDs) ────────────────────────
+  const violationPairs = React.useMemo(() => {
+    const pairs = [];
+    visibleProjects.forEach(p => (p.dependsOn || []).forEach(depId => {
+      const pred = visibleProjects.find(x => x.id === depId);
+      if (pred?.dueDate && p.startDate && pred.dueDate > p.startDate) {
+        const overlapDays = Math.round((new Date(pred.dueDate) - new Date(p.startDate)) / 86400000);
+        pairs.push({ pred, succ: p, overlapDays });
+      }
+    }));
+    return pairs;
+  }, [visibleProjects]);
+
   // ── hover chain ────────────────────────────────────────────────────────────
   const hoveredChain = React.useMemo(() => {
     if (!hoveredId || depsMode !== 'hover') return { up: new Set(), down: new Set() };
@@ -184,7 +230,7 @@ function RoadmapView({ state }) {
   // ── metrics ────────────────────────────────────────────────────────────────
   const todayStr   = today.toISOString().slice(0, 10);
   const todayLabel = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
-  const allActive  = projects.filter(p => p.status !== 'done');
+  const allActive  = projects; // already filtered to exclude done/closed
   const atRiskProjs  = allActive.filter(p => p.status === 'at-risk');
   const blockedProjs = allActive.filter(p => p.status === 'blocked');
   const activePgCount = programs.filter(pg => visibleProjects.some(p => p.programId === pg.id)).length || (visibleProjects.length > 0 ? 1 : 0);
@@ -395,8 +441,10 @@ function RoadmapView({ state }) {
                     borderRadius: 1.5,
                     background: done ? RM.MS_DONE : RM.MS_CLR,
                     border: '1.5px solid var(--bg)',
-                    zIndex: 3, cursor: 'default', flexShrink: 0,
-                  }} />
+                    zIndex: 3, cursor: 'pointer', flexShrink: 0,
+                  }}
+                  onClick={(e) => { e.stopPropagation(); setSelectedMilestoneId(m.id); }}
+                  />
                 );
               })}
             </div>
@@ -413,8 +461,10 @@ function RoadmapView({ state }) {
                 position: 'absolute', left: mx - RM.MS_H / 2, top: barTop - RM.MS_H / 2 + 1,
                 transform: 'rotate(45deg)', width: RM.MS_H, height: RM.MS_H,
                 borderRadius: 1.5, background: done ? RM.MS_DONE : RM.MS_CLR,
-                border: '1.5px solid var(--bg)', zIndex: 3,
-              }} />
+                border: '1.5px solid var(--bg)', zIndex: 3, cursor: 'pointer',
+              }}
+              onClick={(e) => { e.stopPropagation(); setSelectedMilestoneId(m.id); }}
+              />
             );
           })}
         </div>
@@ -501,7 +551,7 @@ function RoadmapView({ state }) {
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="roadmap">
+    <div className="roadmap" style={{ height: 'auto', overflow: 'visible' }}>
 
       {/* Page header — matches Tasks / Risks / Portfolio pattern */}
       <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
@@ -523,7 +573,7 @@ function RoadmapView({ state }) {
             { label: 'ON TRACK', val: allActive.filter(p => p.status === 'on-track').length, sub: `of ${allActive.length} active`, valClr: 'var(--ok)' },
             { label: 'AT RISK',  val: atRiskProjs.length,  sub: atRiskProjs.slice(0,2).map(p=>p.code.toLowerCase()).join(' · ') || 'none', valClr: 'var(--warn)' },
             { label: 'BLOCKED',  val: blockedProjs.length, sub: blockedProjs.slice(0,2).map(p=>p.code.toLowerCase()).join(' · ') || 'none', valClr: 'var(--danger)' },
-            { label: 'DONE',     val: projects.filter(p => p.status === 'done').length, sub: 'total', valClr: 'var(--fg-3)' },
+            { label: 'DONE',     val: allProjects.filter(p => p.status === 'done' || p.status === 'closed').length, sub: 'completed + closed', valClr: 'var(--fg-3)' },
           ].map(m => (
             <div key={m.label} style={{ background: 'var(--bg-1)', padding: '10px 14px' }}>
               <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 4 }}>{m.label}</div>
@@ -535,7 +585,7 @@ function RoadmapView({ state }) {
       </div>
 
       {/* Gantt card — matches Calendar's bordered container */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', marginTop: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: 'auto', border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', marginTop: 16 }}>
 
       {/* Controls */}
       <div className="roadmap-controls">
@@ -546,22 +596,14 @@ function RoadmapView({ state }) {
           ))}
         </div>
 
-        {programs.length > 0 && (
-          <div className="rm-filter-group">
-            <button className={`btn btn-sm${!programFilter ? ' btn-primary' : ''}`} style={{ fontSize: 11 }} onClick={() => setFilter(null)}>All</button>
-            {programs.map(pg => {
-              const code = pg.name.split('.')[0]; // "P1", "P2", etc.
-              return (
-                <button key={pg.id} className={`btn btn-sm${programFilter === pg.id ? ' btn-primary' : ''}`}
-                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-                  title={pg.name}
-                  onClick={() => setFilter(programFilter === pg.id ? null : pg.id)}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-                  {code}{programFilter === pg.id && <span style={{ opacity: 0.6, marginLeft: 1 }}>×</span>}
-                </button>
-              );
-            })}
-          </div>
+        {/* Filter dropdown */}
+        {(programs.length > 0 || projects.some(p => !p.programId)) && (
+          <ProjectFilterDropdown
+            programs={programs}
+            projects={projects}
+            selectedIds={selectedIds}
+            onChange={setSelectedIds}
+          />
         )}
 
         <div className="rm-toggles">
@@ -592,7 +634,8 @@ function RoadmapView({ state }) {
       </div>
 
       {/* Gantt body */}
-      <div className="roadmap-body" ref={bodyRef} onScroll={e => setGanttScroll(e.currentTarget.scrollLeft)}>
+      <div className="roadmap-body" ref={bodyRef} onScroll={e => setGanttScroll(e.currentTarget.scrollLeft)}
+        style={{ flex: 'none', height: rowsHeight + RM.HDR_H + 2, overflowX: 'auto', overflowY: 'hidden' }}>
 
         {/* Sticky header */}
         <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-2)', borderBottom: '1px solid var(--line)', minWidth: RM.LABEL_W + totalWidth }}>
@@ -663,8 +706,8 @@ function RoadmapView({ state }) {
           <div style={{ padding: '80px 24px', textAlign: 'center', color: 'var(--fg-4)' }}>
             <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6 }}>No projects</div>
             <div style={{ fontSize: 12 }}>
-              {programFilter
-                ? <span>No projects in this program. <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => setFilter(null)}>Show all</button></span>
+              {!isAllSelected
+                ? <span>No projects match the selected filter. <button className="btn btn-sm" style={{ marginLeft: 6 }} onClick={() => setSelectedIds(new Set())}>Show all</button></span>
                 : 'Create a project to get started.'}
             </div>
           </div>
@@ -695,6 +738,199 @@ function RoadmapView({ state }) {
       </div>
 
       </div> {/* end gantt card */}
+
+      {/* Critical path + violations analysis */}
+      {(cpChain.length > 0 || violationPairs.length > 0) && (
+        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Critical path */}
+          {cpChain.length > 0 && (() => {
+            const totalDays = cpChain.reduce((sum, id) => {
+              const p = visibleProjects.find(x => x.id === id);
+              if (!p?.startDate || !p?.dueDate) return sum;
+              return sum + Math.max(0, Math.round((new Date(p.dueDate) - new Date(p.startDate)) / 86400000));
+            }, 0);
+            const hasGaps = cpChain.length > 1 && cpChain.some((id, i) => {
+              if (i === 0) return false;
+              const prev = visibleProjects.find(x => x.id === cpChain[i - 1]);
+              const curr = visibleProjects.find(x => x.id === id);
+              return prev?.dueDate && curr?.startDate && curr.startDate > prev.dueDate;
+            });
+            return (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <svg width="18" height="8" style={{ flexShrink: 0 }}><line x1="0" y1="4" x2="16" y2="4" stroke="var(--danger)" strokeWidth="1.5" strokeDasharray="5 2" /></svg>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--fg)' }}>Critical path</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)', marginLeft: 4 }}>{totalDays}d total span · {cpChain.length} project{cpChain.length !== 1 ? 's' : ''}</span>
+                </div>
+                <div style={{ padding: '12px 16px' }}>
+                  <p style={{ fontSize: 12, color: 'var(--fg-3)', marginBottom: 12, lineHeight: 1.6 }}>
+                    The critical path is the longest chain of dependent projects. Any delay to any project on this path pushes out the portfolio end date by the same amount. Projects <em>not</em> on the critical path have float — they can slip without affecting the end date.
+                  </p>
+                  {/* Chain visualization */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap', gap: 0, marginBottom: 12 }}>
+                    {cpChain.map((id, i) => {
+                      const p = visibleProjects.find(x => x.id === id);
+                      if (!p) return null;
+                      const dur = (!p.startDate || !p.dueDate) ? null
+                        : Math.max(0, Math.round((new Date(p.dueDate) - new Date(p.startDate)) / 86400000));
+                      const gap = i > 0 ? (() => {
+                        const prev = visibleProjects.find(x => x.id === cpChain[i - 1]);
+                        if (!prev?.dueDate || !p.startDate) return null;
+                        return Math.round((new Date(p.startDate) - new Date(prev.dueDate)) / 86400000);
+                      })() : null;
+                      return (
+                        <React.Fragment key={id}>
+                          {i > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', padding: '0 4px', alignSelf: 'flex-start', marginTop: 8 }}>
+                              {gap !== null && gap < 0
+                                ? <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--danger)', background: 'var(--danger-soft, color-mix(in oklch, var(--danger) 12%, transparent))', padding: '1px 5px', borderRadius: 3, margin: '0 2px' }}>overlap {Math.abs(gap)}d</span>
+                                : gap !== null && gap > 0
+                                  ? <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', margin: '0 2px' }}>+{gap}d gap →</span>
+                                  : <span style={{ color: 'var(--fg-4)', margin: '0 2px' }}>→</span>
+                              }
+                            </div>
+                          )}
+                          <div style={{ border: `1px solid color-mix(in oklch, var(--danger) 40%, transparent)`, borderRadius: 6, padding: '6px 10px', background: 'color-mix(in oklch, var(--danger) 6%, transparent)', minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                              <span className={`sb-proj-dot pc-${p.status}`} style={{ width: 7, height: 7, flexShrink: 0 }} />
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--fg-2)' }}>{p.code}</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--fg)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {p.name.split('—')[1]?.trim() || p.name}
+                            </div>
+                            {dur !== null && (
+                              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', marginTop: 2 }}>{dur}d</div>
+                            )}
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                  {/* Why explanation */}
+                  <div style={{ fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.6 }}>
+                    <strong style={{ color: 'var(--fg-2)' }}>Why this path?</strong>{' '}
+                    {cpChain.length === 1
+                      ? `${visibleProjects.find(x => x.id === cpChain[0])?.code} has no dependencies and the longest duration, making it the sole critical project.`
+                      : `${visibleProjects.find(x => x.id === cpChain[0])?.code} starts the chain and has no predecessors. Each successor depends on the project before it. This sequence accumulates the longest total span (${totalDays}d), so it controls the earliest possible portfolio end date.`
+                    }
+                    {hasGaps && ' Gaps between projects indicate schedule float — the predecessor finishes before the successor must start.'}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Violations */}
+          {violationPairs.length > 0 && (
+            <div style={{ border: '1px solid color-mix(in oklch, var(--danger) 40%, transparent)', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', borderBottom: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)', background: 'color-mix(in oklch, var(--danger) 6%, transparent)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="warn" size={13} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--fg)' }}>Dependency violations</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--danger)', marginLeft: 4 }}>{violationPairs.length} conflict{violationPairs.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p style={{ fontSize: 12, color: 'var(--fg-3)', marginBottom: 4, lineHeight: 1.6 }}>
+                  A violation occurs when a project's start date is <em>before</em> its predecessor finishes. This means the successor is scheduled to begin before the work it depends on is done.
+                </p>
+                {violationPairs.map(({ pred, succ, overlapDays }) => {
+                  const fixDateSucc = pred.dueDate; // move succ start to pred due
+                  const durSucc = succ.startDate && succ.dueDate
+                    ? Math.round((new Date(succ.dueDate) - new Date(succ.startDate)) / 86400000)
+                    : null;
+                  const newSuccDue = durSucc !== null
+                    ? new Date(new Date(pred.dueDate).getTime() + durSucc * 86400000).toISOString().slice(0, 10)
+                    : null;
+                  return (
+                    <div key={`${pred.id}-${succ.id}`} style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{ padding: '8px 12px', background: 'var(--bg-1)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--fg-2)' }}>{pred.code}</span>
+                        <span style={{ fontSize: 11, color: 'var(--fg-3)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pred.name.split('—')[1]?.trim() || pred.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>ends</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: 'var(--danger)' }}>{pred.dueDate}</span>
+                        <Icon name="chevronR" size={9} style={{ color: 'var(--fg-4)' }} />
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--fg-2)' }}>{succ.code}</span>
+                        <span style={{ fontSize: 11, color: 'var(--fg-3)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{succ.name.split('—')[1]?.trim() || succ.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>starts</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: 'var(--danger)' }}>{succ.startDate}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'color-mix(in oklch, var(--danger) 14%, transparent)', color: 'var(--danger)', marginLeft: 'auto', flexShrink: 0 }}>
+                          {overlapDays}d overlap
+                        </span>
+                      </div>
+                      <div style={{ padding: '8px 12px', background: 'var(--bg)', borderTop: '1px solid var(--line)' }}>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 8 }}>Fix</span>
+                        <span style={{ fontSize: 12, color: 'var(--fg-2)' }}>
+                          Move <strong>{succ.code}</strong>'s start date to <strong>{fixDateSucc}</strong> or later
+                          {newSuccDue ? <> (pushes end date to <strong>{newSuccDue}</strong>)</> : null}.
+                          {' '}Or move <strong>{pred.code}</strong>'s end date to <strong>{succ.startDate}</strong> or earlier if the work can be compressed.
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Milestone detail modal */}
+      {selectedMilestoneId && (() => {
+        const ms = milestones.find(m => m.id === selectedMilestoneId);
+        if (!ms) return null;
+        const proj = projects.find(p => p.id === ms.projectId);
+        const doneDate = ms.doneDate || ms.date;
+        const dueDiff = ms.date && ms.status !== 'done' ? Math.round((new Date(ms.date) - new Date()) / 86400000) : null;
+        const dueColor = dueDiff === null ? 'var(--fg-3)' : dueDiff < 0 ? 'var(--danger)' : dueDiff === 0 ? 'var(--warn)' : 'var(--fg-3)';
+        return (
+          <Modal open title="Milestone" onClose={() => setSelectedMilestoneId(null)}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 10, height: 10, background: ms.status === 'done' ? RM.MS_DONE : RM.MS_CLR, transform: 'rotate(45deg)', borderRadius: 2, flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{ms.name}</span>
+              </div>
+              {proj && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Project</span>
+                  <span style={{ fontSize: 12, color: 'var(--fg-2)', fontWeight: 500 }}>{proj.code} — {proj.name.split('—')[1]?.trim() || proj.name}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Status</div>
+                  <span className={`pill pill-${ms.status === 'done' ? 'ok' : ms.status === 'at-risk' ? 'warn' : 'ghost'}`} style={{ fontSize: 11, textTransform: 'capitalize' }}>{ms.status || 'open'}</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Target date</div>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: dueColor }}>{ms.date || '—'}</span>
+                  {dueDiff !== null && (
+                    <span style={{ fontSize: 11, color: dueColor, marginLeft: 6 }}>{dueDiff < 0 ? `${Math.abs(dueDiff)}d overdue` : dueDiff === 0 ? 'today' : `in ${dueDiff}d`}</span>
+                  )}
+                </div>
+                {ms.status === 'done' && ms.doneDate && (
+                  <div>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Completed</div>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ok)' }}>{ms.doneDate}</span>
+                  </div>
+                )}
+              </div>
+              {ms.description && (
+                <div>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Description</div>
+                  <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>{ms.description}</div>
+                </div>
+              )}
+              <div className="modal-foot">
+                <button className="btn" onClick={() => setSelectedMilestoneId(null)}>Close</button>
+                {proj && <button className="btn btn-ghost btn-sm" onClick={() => { setSelectedMilestoneId(null); actions.setMeta({ activeView: 'project', activeProjectId: proj.id }); }}>Open project</button>}
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
+
+Object.assign(window, { RoadmapView });

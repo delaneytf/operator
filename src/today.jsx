@@ -22,7 +22,7 @@ function PQTaskRow({ task, project, onOpen, onToggle, expanded, onToggleExpand, 
   return (
     <>
       <div
-        className={`trow ${task.status === 'done' ? 'done' : ''} ${expanded ? 'pq-row-active' : ''} ${isDragOver ? 'pq-drag-over' : ''}`}
+        className={`trow ${task.status === 'done' ? 'done' : ''} ${task.status === 'cancelled' ? 'cancelled' : ''} ${expanded ? 'pq-row-active' : ''} ${isDragOver ? 'pq-drag-over' : ''}`}
         onClick={onToggleExpand}
         style={{ cursor: 'pointer' }}
         data-task-id={task.id}
@@ -34,7 +34,7 @@ function PQTaskRow({ task, project, onOpen, onToggle, expanded, onToggleExpand, 
       >
         <span className="trow-drag" style={{ cursor: 'grab' }} />
         <button className="trow-check" onClick={handleCheck} aria-label="Toggle done">
-          <Icon name="check" size={11} />
+          <Icon name={task.status === 'cancelled' ? 'x' : 'check'} size={11} />
         </button>
         <PriorityBadge priority={task.priority} />
         <div className="truncate">

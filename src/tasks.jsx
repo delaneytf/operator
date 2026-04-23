@@ -19,7 +19,7 @@ function TaskRow({ task, project, onOpen, onToggle, showProject = false, dragPro
   return (
     <>
     <div
-      className={`trow ${task.status === 'done' ? 'done' : ''} ${dropState || ''} ${expanded ? 'pq-row-active' : ''}`}
+      className={`trow ${task.status === 'done' ? 'done' : ''} ${task.status === 'cancelled' ? 'cancelled' : ''} ${dropState || ''} ${expanded ? 'pq-row-active' : ''}`}
       onClick={handleClick}
       style={onToggleExpand ? { cursor: 'pointer' } : undefined}
       draggable={!!dragProps.onDragStart}
@@ -31,7 +31,7 @@ function TaskRow({ task, project, onOpen, onToggle, showProject = false, dragPro
         onClick={handleCheck}
         aria-label="Toggle done"
       >
-        <Icon name="check" size={11} />
+        <Icon name={task.status === 'cancelled' ? 'x' : 'check'} size={11} />
       </button>
       <PriorityBadge priority={task.priority} />
       <div className="truncate">
@@ -405,6 +405,7 @@ function TaskModal({ taskId, state, onClose, defaults = {} }) {
   const [newBlockerWho, setNewBlockerWho] = useStateT('');
   const [newBlockerJira, setNewBlockerJira] = useStateT('');
   const [pendingBlockers, setPendingBlockers] = useStateT([]);
+  const [showBlockerForm, setShowBlockerForm] = useStateT(false);
   const [completingFromModal, setCompletingFromModal] = useStateT(false);
 
   const save = (patch) => {
@@ -545,7 +546,14 @@ function TaskModal({ taskId, state, onClose, defaults = {} }) {
       <TaskDependencyEditor
         task={local}
         state={state}
-        onChange={(ids) => isNew ? save({ dependsOn: ids }) : actions.setTaskDependency(existingTask.id, ids)}
+        onChange={(ids) => {
+          if (isNew) {
+            save({ dependsOn: ids });
+          } else {
+            actions.setTaskDependency(existingTask.id, ids);
+            setLocal((prev) => ({ ...prev, dependsOn: ids }));
+          }
+        }}
       />
 
       <div className="hr" />
@@ -587,18 +595,25 @@ function TaskModal({ taskId, state, onClose, defaults = {} }) {
           })}
         </div>
       )}
-      <div className="row-flex" style={{ gap: 6, flexWrap: 'wrap' }}>
-        <input className="input" style={{ flex: 2, minWidth: 160 }} placeholder="What's blocking you?" value={newBlocker} onChange={(e) => setNewBlocker(e.target.value)} />
-        <input className="input" style={{ flex: 1, minWidth: 100 }} placeholder="Who / what (person or team)" value={newBlockerWho} onChange={(e) => setNewBlockerWho(e.target.value)} />
-        <input className="input" style={{ width: 110 }} placeholder="Jira key (if dev)" value={newBlockerJira} onChange={(e) => setNewBlockerJira(e.target.value.toUpperCase())}
-          onKeyDown={(e) => { if (e.key === 'Enter') { if (isNew) addPendingBlocker(); else { if (!newBlocker.trim()) return; actions.addBlocker({ taskId: existingTask.id, description: newBlocker.trim(), waitingOn: newBlockerWho.trim() || '—', jiraKey: newBlockerJira.trim() || null, kind: newBlockerJira.trim() ? 'blocker' : 'waiting' }); setNewBlocker(''); setNewBlockerWho(''); setNewBlockerJira(''); } } }} />
-        <button className="btn" onClick={() => {
-          if (isNew) { addPendingBlocker(); return; }
-          if (!newBlocker.trim()) return;
-          actions.addBlocker({ taskId: existingTask.id, description: newBlocker.trim(), waitingOn: newBlockerWho.trim() || '—', jiraKey: newBlockerJira.trim() || null, kind: newBlockerJira.trim() ? 'blocker' : 'waiting' });
-          setNewBlocker(''); setNewBlockerWho(''); setNewBlockerJira('');
-        }}>Add</button>
-      </div>
+      {showBlockerForm ? (
+        <div className="row-flex" style={{ gap: 6, flexWrap: 'wrap' }}>
+          <input className="input" style={{ flex: 2, minWidth: 160 }} placeholder="What's blocking you?" value={newBlocker} onChange={(e) => setNewBlocker(e.target.value)} autoFocus />
+          <input className="input" style={{ flex: 1, minWidth: 100 }} placeholder="Who / what (person or team)" value={newBlockerWho} onChange={(e) => setNewBlockerWho(e.target.value)} />
+          <input className="input" style={{ width: 110 }} placeholder="Jira key (if dev)" value={newBlockerJira} onChange={(e) => setNewBlockerJira(e.target.value.toUpperCase())}
+            onKeyDown={(e) => { if (e.key === 'Enter') { if (isNew) { addPendingBlocker(); setShowBlockerForm(false); } else { if (!newBlocker.trim()) return; actions.addBlocker({ taskId: existingTask.id, description: newBlocker.trim(), waitingOn: newBlockerWho.trim() || '—', jiraKey: newBlockerJira.trim() || null, kind: newBlockerJira.trim() ? 'blocker' : 'waiting' }); setNewBlocker(''); setNewBlockerWho(''); setNewBlockerJira(''); setShowBlockerForm(false); } } }} />
+          <button className="btn" onClick={() => {
+            if (isNew) { addPendingBlocker(); setShowBlockerForm(false); return; }
+            if (!newBlocker.trim()) return;
+            actions.addBlocker({ taskId: existingTask.id, description: newBlocker.trim(), waitingOn: newBlockerWho.trim() || '—', jiraKey: newBlockerJira.trim() || null, kind: newBlockerJira.trim() ? 'blocker' : 'waiting' });
+            setNewBlocker(''); setNewBlockerWho(''); setNewBlockerJira(''); setShowBlockerForm(false);
+          }}>Add</button>
+          <button className="btn btn-ghost" onClick={() => { setShowBlockerForm(false); setNewBlocker(''); setNewBlockerWho(''); setNewBlockerJira(''); }}>Cancel</button>
+        </div>
+      ) : (
+        <button className="btn btn-sm btn-ghost" onClick={() => setShowBlockerForm(true)} style={{ marginTop: 2 }}>
+          <Icon name="plus" size={10} /> Add blocker
+        </button>
+      )}
 
       <div className="modal-foot">
         {isNew ? (

@@ -12,8 +12,8 @@ function ProgramView({ state, programId, onOpenProject }) {
   const allTasks = (state.tasks || []).filter(t => projects.some(p => p.id === t.projectId));
   const allRisks = (state.risks || []).filter(r => projects.some(p => p.id === r.projectId));
 
-  const activeProjects = projects.filter(p => p.status !== 'done');
-  const doneProjects = projects.filter(p => p.status === 'done');
+  const activeProjects = projects.filter(p => p.status !== 'done' && p.status !== 'closed');
+  const doneProjects = projects.filter(p => p.status === 'done' || p.status === 'closed');
   const atRisk = projects.filter(p => p.status === 'at-risk' || p.status === 'blocked').length;
   const openTasks = allTasks.filter(t => t.status !== 'done').length;
   const openRisks = allRisks.filter(r => r.status !== 'closed').length;
@@ -21,7 +21,7 @@ function ProgramView({ state, programId, onOpenProject }) {
   // Overall program progress — average of all project progress
   const progPcts = projects.map(p => {
     const ms = allMilestones.filter(m => m.projectId === p.id);
-    if (!ms.length) return p.status === 'done' ? 100 : 0;
+    if (!ms.length) return (p.status === 'done' || p.status === 'closed') ? 100 : 0;
     return Math.round(ms.filter(m => m.status === 'done').length / ms.length * 100);
   });
   const avgPct = progPcts.length ? Math.round(progPcts.reduce((a, b) => a + b, 0) / progPcts.length) : 0;
@@ -33,8 +33,8 @@ function ProgramView({ state, programId, onOpenProject }) {
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .slice(0, 8);
 
-  const STATUS_ORDER = { 'blocked': 0, 'at-risk': 1, 'on-track': 2, 'done': 3 };
-  const sortedProjects = [...projects].sort((a, b) => (STATUS_ORDER[a.status] ?? 4) - (STATUS_ORDER[b.status] ?? 4));
+  const STATUS_ORDER = { 'blocked': 0, 'at-risk': 1, 'on-track': 2, 'done': 3, 'closed': 4 };
+  const sortedProjects = [...projects].sort((a, b) => (STATUS_ORDER[a.status] ?? 5) - (STATUS_ORDER[b.status] ?? 5));
 
   const startEdit = () => {
     setHeaderDraft({ name: program.name, description: program.description || '', deliverable: program.deliverable || '' });
@@ -76,7 +76,11 @@ function ProgramView({ state, programId, onOpenProject }) {
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{programCode}</div>
                 <div className="title-h1">{program.name.replace(/^P\d+\.\s*/, '')}</div>
               </div>
-              <button className="icon-btn" title="Edit program" onClick={startEdit}><Icon name="edit" size={13} /></button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                {program.status === 'done' && <span className="pill pill-ok" style={{ fontSize: 11 }}>Completed</span>}
+                {program.status === 'closed' && <span className="pill pill-neutral" style={{ fontSize: 11 }}>Closed</span>}
+                <button className="icon-btn" title="Edit program" onClick={startEdit}><Icon name="edit" size={13} /></button>
+              </div>
             </div>
             {program.description && (
               <div className="title-sub" style={{ marginBottom: 8 }}>{program.description}</div>
@@ -96,7 +100,7 @@ function ProgramView({ state, programId, onOpenProject }) {
       {/* Stat chips */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
         {[
-          { label: 'Projects', value: projects.length, sub: `${doneProjects.length} done` },
+          { label: 'Projects', value: projects.length, sub: `${doneProjects.length} completed/closed` },
           { label: 'Progress', value: `${avgPct}%`, sub: 'avg across projects' },
           { label: 'At risk / blocked', value: atRisk, tone: atRisk > 0 ? 'var(--warn)' : null },
           { label: 'Open tasks', value: openTasks },
@@ -121,7 +125,7 @@ function ProgramView({ state, programId, onOpenProject }) {
           )}
           {sortedProjects.map(p => {
             const ms = allMilestones.filter(m => m.projectId === p.id);
-            const donePct = ms.length ? Math.round(ms.filter(m => m.status === 'done').length / ms.length * 100) : (p.status === 'done' ? 100 : 0);
+            const donePct = ms.length ? Math.round(ms.filter(m => m.status === 'done').length / ms.length * 100) : ((p.status === 'done' || p.status === 'closed') ? 100 : 0);
             const nextMs = ms.filter(m => m.status !== 'done' && m.date).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
             const openT = allTasks.filter(t => t.projectId === p.id && t.status !== 'done').length;
             const highRisks = allRisks.filter(r => r.projectId === p.id && r.status !== 'closed' && r.severity * r.likelihood >= 12).length;

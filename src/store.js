@@ -235,7 +235,7 @@ const actions = {
 
   // Programs
   addProgram(p) {
-    const prog = { id: uid('pg'), name: p.name || 'New Program', description: p.description || '', createdAt: todayStr() };
+    const prog = { id: uid('pg'), name: p.name || 'New Program', description: p.description || '', status: 'active', createdAt: todayStr() };
     setState((s) => ({ ...s, programs: [...(s.programs || []), prog] }));
     return prog;
   },
@@ -270,7 +270,24 @@ const actions = {
     return proj;
   },
   updateProject(id, patch) {
+    if (patch.status === 'closed') { actions.closeProject(id); return; }
     setState((s) => ({ ...s, projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  },
+  closeProject(id) {
+    const today = todayStr();
+    setState((s) => ({
+      ...s,
+      projects: s.projects.map((p) => p.id === id ? { ...p, status: 'closed', closedDate: today } : p),
+      tasks: s.tasks.map((t) => (t.projectId === id && t.status !== 'done' && t.status !== 'cancelled') ? { ...t, status: 'cancelled', cancelledAt: today, updatedAt: today } : t),
+      milestones: s.milestones.map((m) => (m.projectId === id && m.status !== 'done' && m.status !== 'cancelled') ? { ...m, status: 'cancelled' } : m),
+      notes: s.notes.map((n) => {
+        if (n.projectId !== id || n.cancelled) return n;
+        if (n.kind === 'question' && !n.resolved) return { ...n, cancelled: true, cancelledAt: today };
+        if (n.kind === 'decision') return { ...n, cancelled: true, cancelledAt: today };
+        return n;
+      }),
+      risks: s.risks.map((r) => (r.projectId === id && r.status !== 'closed' && r.status !== 'cancelled') ? { ...r, status: 'cancelled', cancelledAt: today } : r),
+    }));
   },
   deleteProject(id) {
     setState((s) => ({

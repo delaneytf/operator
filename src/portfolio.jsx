@@ -2,8 +2,8 @@
 
 function Portfolio({ state, onOpenProject, onOpenTask }) {
   const { projects } = state;
-  const activeProjects = projects.filter((p) => p.status !== 'done');
-  const doneProjects = projects.filter((p) => p.status === 'done');
+  const activeProjects = projects.filter((p) => p.status !== 'done' && p.status !== 'closed');
+  const doneProjects = projects.filter((p) => p.status === 'done' || p.status === 'closed');
   const sortByPriority = (arr) => [...arr].sort((a, b) => {
     const po = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
     if (po !== 0) return po;
@@ -12,6 +12,12 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
   const sorted = sortByPriority(activeProjects);
   const sortedDone = sortByPriority(doneProjects);
   const [doneExpanded, setDoneExpanded] = React.useState(false);
+  const [collapsedProgramIds, setCollapsedProgramIds] = React.useState(() => {
+    const init = {};
+    (state.programs || []).forEach(pg => { init[pg.id] = true; });
+    return init;
+  });
+  const [closeProgramId, setCloseProgramId] = React.useState(null);
 
   const workload = workloadByDay(state, 14);
   const maxHours = Math.max(...workload.map((b) => b.hours), 8);
@@ -19,6 +25,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
   const [activeDayDate, setActiveDayDate] = React.useState(null);
   const [expandedOverload, setExpandedOverload] = React.useState(null);
   const [expandedRiskId, setExpandedRiskId] = React.useState(null);
+  const [editingRiskId, setEditingRiskId] = React.useState(null);
   const [showTopRisks, setShowTopRisks] = React.useState(true);
   const [taskDetailId, setTaskDetailId] = React.useState(null);
   const RR   = window.RiskRow;
@@ -31,10 +38,10 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
 
   // metrics
   const allTasks = state.tasks;
-  const openTasks = allTasks.filter((t) => t.status !== 'done');
+  const openTasks = allTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
   const overdue = openTasks.filter((t) => t.dueDate && daysFromToday(t.dueDate) < 0);
   const blocked = openTasks.filter((t) => t.status === 'blocked' || (t.blockers || []).length);
-  const totalRiskPeak = Math.max(0, ...state.risks.filter((r) => r.status !== 'closed').map((r) => r.severity * r.likelihood));
+  const totalRiskPeak = Math.max(0, ...state.risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').map((r) => r.severity * r.likelihood));
 
   return (
     <>
@@ -68,7 +75,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
           <span className="metric-val" style={{ color: totalRiskPeak >= 12 ? 'var(--danger)' : totalRiskPeak >= 8 ? 'var(--warn)' : 'var(--fg)' }}>
             {totalRiskPeak}
           </span>
-          <span className="metric-delta">{state.risks.filter((r) => r.status !== 'closed').length} open risks</span>
+          <span className="metric-delta">{state.risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').length} open risks</span>
         </div>
         <div className="metric-cell">
           <span className="metric-label">Next 14d load</span>
@@ -166,7 +173,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
                       {sorted.map((t) => {
                         const p = projects.find((pp) => pp.id === t.projectId);
                         return (
-                          <div key={t.id} className="workload-task-row" onClick={() => onOpenTask && onOpenTask(t.id)}>
+                          <div key={t.id} className="workload-task-row" onClick={() => setTaskDetailId(t.id)}>
                             <PriorityBadge priority={t.priority} />
                             <span style={{ flex: 1, minWidth: 0 }} className="truncate">{t.title}</span>
                             {p && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>{p.code}</span>}
@@ -189,15 +196,15 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
           onClick={() => setShowTopRisks((v) => !v)}>
           <span className="card-head-title" style={{ color: 'var(--fg-3)' }}>Top risks · all projects</span>
           <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>
-            {state.risks.filter((r) => r.status !== 'closed').length} open · sorted by severity×likelihood
+            {state.risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').length} open · sorted by severity×likelihood
           </span>
           <Icon name={showTopRisks ? 'chevronD' : 'chevronR'} size={10} style={{ marginLeft: 8 }} />
         </button>
         {showTopRisks && <div>
-          {state.risks.filter((r) => r.status !== 'closed').length === 0 ? (
+          {state.risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').length === 0 ? (
             <EmptyState title="No open risks" icon="check" />
           ) : state.risks
-            .filter((r) => r.status !== 'closed')
+            .filter((r) => r.status !== 'closed' && r.status !== 'cancelled')
             .sort((a, b) => b.severity * b.likelihood - a.severity * a.likelihood)
             .slice(0, 5)
             .map((r) => {
@@ -207,7 +214,7 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
                   project={p}
                   expanded={expandedRiskId === r.id}
                   onToggleExpand={() => setExpandedRiskId((prev) => prev === r.id ? null : r.id)}
-                  onEdit={() => onOpenProject(r.projectId)}
+                  onEdit={() => setEditingRiskId(r.id)}
                   enabledFields={enabledFields}
                   hideFromRow={['category', 'response', 'reviewDate']} />
               ) : null;
@@ -215,12 +222,130 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
         </div>}
       </div>
 
-      {/* Project rows — horizontal stacked */}
-      <div className="sh"><span className="sh-title">Projects · by priority</span><span className="sh-meta">{activeProjects.length}</span></div>
-      <div className="pcard-stack" style={{ marginBottom: 22 }}>
-        {sorted.map((p) => <ProjectCard key={p.id} project={p} state={state} onOpen={() => onOpenProject(p.id)} />)}
-        {sorted.length === 0 && <EmptyState title="No active projects" body="All projects are done." icon="check" />}
-      </div>
+      {/* Project rows — grouped by program */}
+      {(() => {
+        const programs = state.programs || [];
+        const toggleProgram = (id) => setCollapsedProgramIds(prev => ({ ...prev, [id]: !prev[id] }));
+
+        // Build program groups including ALL projects (active + done/closed)
+        const programGroups = programs
+          .map(pg => {
+            const allPgProjs = projects.filter(p => p.programId === pg.id);
+            const activePgProjs = sorted.filter(p => p.programId === pg.id);
+            const donePgProjs = sortedDone.filter(p => p.programId === pg.id);
+            return { program: pg, projects: allPgProjs, activeProjects: activePgProjs, doneProjects: donePgProjs };
+          })
+          .filter(g => g.projects.length > 0);
+
+        // Active programs vs completed/closed programs
+        const activeProgramGroups = programGroups.filter(g => g.program.status !== 'done' && g.program.status !== 'closed');
+        const doneProgramGroups = programGroups.filter(g => g.program.status === 'done' || g.program.status === 'closed');
+
+        const standaloneProjects = sorted.filter(p => !p.programId);
+        const standaloneDone = sortedDone.filter(p => !p.programId);
+        const totalCount = activeProgramGroups.length + standaloneProjects.length;
+
+        return (
+          <>
+            <div className="sh">
+              <span className="sh-title">Programs</span>
+              <span className="sh-meta">{totalCount}</span>
+            </div>
+
+            {totalCount === 0 && (
+              <EmptyState title="No active projects" body="All projects are completed or closed." icon="check" />
+            )}
+
+            <div className="pcard-stack">
+              {activeProgramGroups.map(({ program: pg, projects: pgProjs, activeProjects: pgActive, doneProjects: pgDone }) => {
+                const isCollapsed = !!collapsedProgramIds[pg.id];
+                const allFinished = pgProjs.every(p => p.status === 'done' || p.status === 'closed');
+                return (
+                  <div key={pg.id}>
+                    <ProgramRow
+                      program={pg}
+                      projects={pgProjs}
+                      state={state}
+                      collapsed={isCollapsed}
+                      onToggle={() => toggleProgram(pg.id)}
+                      onView={() => actions.setMeta({ activeView: 'program', activeProgramId: pg.id })}
+                    />
+                    {!isCollapsed && pgProjs.length > 0 && (
+                      <div className="prow-children">
+                        {[...pgActive, ...pgDone].map((p) => (
+                          <ProjectChildRow key={p.id} project={p} state={state} onOpen={() => onOpenProject(p.id)} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {standaloneProjects.map(p => (
+                <StandaloneRow key={p.id} project={p} state={state} onOpen={() => onOpenProject(p.id)}
+                  onView={() => onOpenProject(p.id)} />
+              ))}
+            </div>
+
+            {/* Completed & Closed section */}
+            {(doneProgramGroups.length > 0 || standaloneDone.length > 0) && (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="tgroup-head tgroup-head-toggle" style={{ borderTop: 'none' }} onClick={() => setDoneExpanded(x => !x)}>
+                  <Icon name={doneExpanded ? 'chevronD' : 'chevronR'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                  <span>Completed &amp; Closed</span>
+                  <span className="tgroup-head-count">
+                    {doneProgramGroups.length + standaloneDone.length}
+                  </span>
+                </div>
+                {doneExpanded && (
+                  <div>
+                    {doneProgramGroups.map(({ program: pg, projects: pgProjs, activeProjects: pgActive, doneProjects: pgDone }) => {
+                      const isCollapsed = collapsedProgramIds[pg.id] !== false;
+                      const pgTone = pg.status === 'done' ? 'ok' : 'neutral';
+                      return (
+                        <React.Fragment key={pg.id}>
+                          <div className="prow-done-row prow-done-row-toggle" onClick={() => toggleProgram(pg.id)}>
+                            <Icon name={isCollapsed ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                            <span className="prow-done-tag">Program · {pgProjs.length}P</span>
+                            <span className="prow-done-name truncate">{pg.name}</span>
+                            <Pill tone={pgTone}>{PROJECT_STATUS_LABEL[pg.status] || 'Completed'}</Pill>
+                            <button className="prow-view-btn" onClick={(e) => { e.stopPropagation(); actions.setMeta({ activeView: 'program', activeProgramId: pg.id }); }}>View →</button>
+                          </div>
+                          {!isCollapsed && pgProjs.map((p) => {
+                            const pTone = p.status === 'done' ? 'ok' : 'neutral';
+                            return (
+                              <div key={p.id} className="prow-done-row prow-done-row-child" onClick={() => onOpenProject(p.id)}>
+                                <span />
+                                <span className="prow-done-tag">{p.code}</span>
+                                <span className="prow-done-name truncate">{p.name}</span>
+                                <Pill tone={pTone}>{PROJECT_STATUS_LABEL[p.status]}</Pill>
+                                <button className="prow-view-btn" onClick={(e) => { e.stopPropagation(); onOpenProject(p.id); }}>View →</button>
+                              </div>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    })}
+                    {standaloneDone.map((p) => {
+                      const pTone = p.status === 'done' ? 'ok' : 'neutral';
+                      return (
+                        <div key={p.id} className="prow-done-row" onClick={() => onOpenProject(p.id)}>
+                          <span />
+                          <span className="prow-done-tag">Project</span>
+                          <span className="prow-done-name truncate">{p.name}</span>
+                          <Pill tone={pTone}>{PROJECT_STATUS_LABEL[p.status]}</Pill>
+                          <button className="prow-view-btn" onClick={(e) => { e.stopPropagation(); onOpenProject(p.id); }}>View →</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        );
+      })()}
+      <div style={{ marginBottom: 22 }} />
 
       {/* Stale projects */}
       {(() => {
@@ -246,23 +371,6 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
           </div>
         );
       })()}
-
-      {/* Done projects — collapsible */}
-      {sortedDone.length > 0 && (
-        <div className="card" style={{ marginBottom: 22, opacity: 0.85 }}>
-          <button className="card-head" style={{ width: '100%', cursor: 'pointer', border: 'none', textAlign: 'left', color: 'var(--fg-3)' }}
-            onClick={() => setDoneExpanded((x) => !x)}>
-            <span className="card-head-title"><Icon name="check" size={11} /> Done projects</span>
-            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{sortedDone.length}</span>
-            <Icon name={doneExpanded ? 'chevronD' : 'chevronR'} size={10} style={{ marginLeft: 'auto' }} />
-          </button>
-          {doneExpanded && (
-            <div className="pcard-stack">
-              {sortedDone.map((p) => <ProjectCard key={p.id} project={p} state={state} onOpen={() => onOpenProject(p.id)} />)}
-            </div>
-          )}
-        </div>
-      )}
     </div>
 
     {/* Read-only task detail modal */}
@@ -275,86 +383,179 @@ function Portfolio({ state, onOpenProject, onOpenTask }) {
         onJumpTo={(id) => setTaskDetailId(id)}
       />
     )}
+    {/* Risk edit modal */}
+    {editingRiskId && window.RiskModal && (
+      <window.RiskModal
+        riskId={editingRiskId}
+        state={state}
+        onClose={() => setEditingRiskId(null)}
+      />
+    )}
+
+    {/* Close program confirmation modal */}
+    {closeProgramId && (() => {
+      const pg = (state.programs || []).find(p => p.id === closeProgramId);
+      if (!pg) return null;
+      return (
+        <Modal open title={`Close program: ${pg.name}`} onClose={() => setCloseProgramId(null)}>
+          <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+            Mark this program as <strong>Closed</strong>? All associated projects are already completed or closed.
+          </div>
+          <div className="modal-foot">
+            <button className="btn" onClick={() => setCloseProgramId(null)}>Cancel</button>
+            <button className="btn btn-danger" onClick={() => {
+              actions.updateProgram(closeProgramId, { status: 'closed', closedDate: new Date().toISOString().slice(0, 10) });
+              setCloseProgramId(null);
+            }}>Close program</button>
+          </div>
+        </Modal>
+      );
+    })()}
     </>
   );
 }
 
-function ProjectCard({ project, state, onOpen }) {
-  const prog = projectProgress(state, project.id);
-  const risk = projectRiskScore(state, project.id);
-  const nextMs = state.milestones
-    .filter((m) => m.projectId === project.id && m.status !== 'done')
-    .sort((a, b) => a.date.localeCompare(b.date))[0];
-  const openTasks = state.tasks.filter((t) => t.projectId === project.id && t.status !== 'done');
-  const overdue = openTasks.filter((t) => t.dueDate && daysFromToday(t.dueDate) < 0);
+// --- Shared helpers for row components ---
+function rowStatusTone(status) {
+  return { 'on-track': 'ok', 'at-risk': 'warn', 'blocked': 'danger', 'done': 'neutral', 'closed': 'neutral' }[status] || 'neutral';
+}
+function rowProgTone(status) {
+  return status === 'blocked' ? 'danger' : status === 'at-risk' ? 'warn' : 'ok';
+}
+function rowProgressColor(status) {
+  return status === 'blocked' ? 'var(--danger)' : status === 'at-risk' ? 'var(--warn)' : 'var(--ok)';
+}
 
-  const statusTone = {
-    'on-track': 'ok',
-    'at-risk': 'warn',
-    'blocked': 'danger',
-    'done': 'neutral',
-  }[project.status];
-
-  const progTone = project.status === 'blocked' ? 'danger' : project.status === 'at-risk' ? 'warn' : 'ok';
+function ProgramRow({ program, projects, state, collapsed, onToggle, onView }) {
+  const allTasks = state.tasks.filter(t => projects.some(p => p.id === t.projectId));
+  const openTasks = allTasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
+  const overdue = openTasks.filter(t => t.dueDate && daysFromToday(t.dueDate) < 0);
+  const avgPct = projects.length
+    ? Math.round(projects.reduce((s, p) => s + (projectProgress(state, p.id).pct || 0), 0) / projects.length)
+    : 0;
+  const effectiveStatus = (program.status === 'done' || program.status === 'closed')
+    ? program.status
+    : (['blocked', 'at-risk', 'on-track', 'done'].find(s => projects.some(p => p.status === s)) || 'on-track');
+  const bestPriority = [...projects].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])[0]?.priority;
+  const activeCount = projects.filter(p => p.status !== 'done' && p.status !== 'closed').length;
+  const latestDue = projects.filter(p => p.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(-1)[0]?.dueDate;
 
   return (
-    <div className="prow" onClick={onOpen}>
-      <div className={`prow-accent prow-accent-${project.status}`} />
-
-      {/* Identity */}
+    <div className="prow" onClick={onToggle} style={{ userSelect: 'none' }}>
+      <div className={`prow-accent prow-accent-${effectiveStatus}`} />
       <div className="prow-ident">
-        <div className="pcard-code">{project.code}</div>
-        <div className="prow-title truncate">{project.name}</div>
-        <div className="prow-obj truncate">{project.objective}</div>
+        <div className="prow-tag">
+          <Icon name="chevronD" size={10} className={collapsed ? 'prow-tag-chev-closed' : 'prow-tag-chev-open'} />
+          <span>Program · {projects.length}P</span>
+        </div>
+        <div className="prow-title" title={program.name}>
+          <span className="prow-title-code">{program.name.match(/^[A-Z0-9]+\.?\s*/)?.[0] || ''}</span>
+          {program.name.replace(/^[A-Z0-9]+\.?\s*/, '') || program.name}
+        </div>
+        {program.description && <div className="prow-obj" title={program.description}>{program.description}</div>}
       </div>
+      <div className="prow-pills">
+        {bestPriority && <PriorityBadge priority={bestPriority} />}
+        <Pill tone={rowStatusTone(effectiveStatus)}>{PROJECT_STATUS_LABEL[effectiveStatus]}</Pill>
+      </div>
+      <div className="prow-progress">
+        <div className="prow-progress-head">
+          <span>{activeCount} active · {avgPct}% avg</span>
+          <span>{latestDue ? `due ${fmtDate(latestDue)}` : ''}</span>
+        </div>
+        <div className="prow-progress-bar">
+          <div className="prow-progress-fill" style={{ width: `${Math.max(0, Math.min(100, avgPct))}%`, background: rowProgressColor(effectiveStatus) }} />
+        </div>
+      </div>
+      <div className="prow-overdue">
+        <span className="prow-overdue-label">Overdue</span>
+        <span className="prow-overdue-val" style={{ color: overdue.length ? 'var(--danger)' : undefined }}>{overdue.length}</span>
+      </div>
+      <div className="prow-actions">
+        {onView && (
+          <button className="prow-view-btn" onClick={(e) => { e.stopPropagation(); onView(); }}>View →</button>
+        )}
+      </div>
+    </div>
+  );
+}
 
-      {/* Status pills */}
+function ProjectChildRow({ project, state, onOpen, muted = false }) {
+  const prog = projectProgress(state, project.id);
+  const openTasks = state.tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'cancelled');
+  const overdue = openTasks.filter(t => t.dueDate && daysFromToday(t.dueDate) < 0);
+  const statusTone = rowStatusTone(project.status);
+
+  return (
+    <div className="prow-child" onClick={onOpen} style={muted ? { opacity: 0.65 } : undefined}>
+      <div className="prow-ident" style={{ paddingLeft: 0 }}>
+        <div className="prow-tag"><span>{project.code}</span></div>
+        <div className="prow-title" title={project.name}>
+          {project.name}
+        </div>
+        {project.objective && <div className="prow-obj" title={project.objective}>{project.objective}</div>}
+      </div>
       <div className="prow-pills">
         <PriorityBadge priority={project.priority} />
         <Pill tone={statusTone}>{PROJECT_STATUS_LABEL[project.status]}</Pill>
       </div>
-
-      {/* Progress */}
       <div className="prow-progress">
-        <div className="row-flex-sb" style={{ marginBottom: 4 }}>
-          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
-            {prog.done}/{prog.total} · {prog.pct}%
-          </span>
-          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>
-            due {fmtDate(project.dueDate)}
-          </span>
+        <div className="prow-progress-head">
+          <span>{prog.done}/{prog.total} · {prog.pct}%</span>
+          <span>{project.dueDate ? `due ${fmtDate(project.dueDate)}` : ''}</span>
         </div>
-        <Progress value={prog.pct} tone={progTone} />
-      </div>
-
-      {/* Metrics */}
-      <div className="prow-metrics">
-        <div className="prow-metric">
-          <span className="prow-metric-label">Next</span>
-          <span className="prow-metric-val prow-metric-next">
-            {nextMs ? (
-              <>
-                <span className="mono" style={{ color: 'var(--fg-2)' }}>{fmtRelative(nextMs.date)}</span>
-                <span className="prow-metric-sub truncate"> · {nextMs.title}</span>
-              </>
-            ) : '—'}
-          </span>
-        </div>
-        <div className="prow-metric">
-          <span className="prow-metric-label">Overdue</span>
-          <span className="prow-metric-val" style={{ color: overdue.length ? 'var(--danger)' : 'var(--fg-3)' }}>
-            {overdue.length}
-          </span>
-        </div>
-        <div className="prow-metric">
-          <span className="prow-metric-label">Risk</span>
-          <span className="prow-metric-val" style={{ color: risk.peak >= 12 ? 'var(--danger)' : risk.peak >= 8 ? 'var(--warn)' : 'var(--fg-3)' }}>
-            {risk.peak || '—'}
-          </span>
+        <div className="prow-progress-bar">
+          <div className="prow-progress-fill" style={{ width: `${Math.max(0, Math.min(100, prog.pct))}%`, background: rowProgressColor(project.status) }} />
         </div>
       </div>
+      <div className="prow-overdue">
+        <span className="prow-overdue-label">Overdue</span>
+        <span className="prow-overdue-val" style={{ color: overdue.length ? 'var(--danger)' : undefined }}>{overdue.length}</span>
+      </div>
+      <div className="prow-actions" />
+    </div>
+  );
+}
 
-      <div className="prow-chev"><Icon name="chevronR" size={14} /></div>
+function StandaloneRow({ project, state, onOpen, onView, muted = false }) {
+  const prog = projectProgress(state, project.id);
+  const openTasks = state.tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'cancelled');
+  const overdue = openTasks.filter(t => t.dueDate && daysFromToday(t.dueDate) < 0);
+  const statusTone = rowStatusTone(project.status);
+
+  return (
+    <div className="prow" onClick={onOpen} style={muted ? { opacity: 0.65 } : undefined}>
+      <div className={`prow-accent prow-accent-${project.status}`} />
+      <div className="prow-ident">
+        <div className="prow-tag">
+          <span style={{ fontSize: 11 }}>◇</span>
+          <span>Standalone Project</span>
+        </div>
+        <div className="prow-title" title={project.name}>{project.name}</div>
+        {project.objective && <div className="prow-obj" title={project.objective}>{project.objective}</div>}
+      </div>
+      <div className="prow-pills">
+        <PriorityBadge priority={project.priority} />
+        <Pill tone={statusTone}>{PROJECT_STATUS_LABEL[project.status]}</Pill>
+      </div>
+      <div className="prow-progress">
+        <div className="prow-progress-head">
+          <span>{prog.done}/{prog.total} · {prog.pct}%</span>
+          <span>{project.dueDate ? `due ${fmtDate(project.dueDate)}` : ''}</span>
+        </div>
+        <div className="prow-progress-bar">
+          <div className="prow-progress-fill" style={{ width: `${Math.max(0, Math.min(100, prog.pct))}%`, background: rowProgressColor(project.status) }} />
+        </div>
+      </div>
+      <div className="prow-overdue">
+        <span className="prow-overdue-label">Overdue</span>
+        <span className="prow-overdue-val" style={{ color: overdue.length ? 'var(--danger)' : undefined }}>{overdue.length}</span>
+      </div>
+      <div className="prow-actions">
+        {onView && (
+          <button className="prow-view-btn" onClick={(e) => { e.stopPropagation(); onView(); }}>View →</button>
+        )}
+      </div>
     </div>
   );
 }
@@ -398,4 +599,4 @@ function RiskMatrix({ risks, projects, onRisk }) {
   );
 }
 
-Object.assign(window, { Portfolio, ProjectCard, RiskMatrix });
+Object.assign(window, { Portfolio, ProgramRow, ProjectChildRow, StandaloneRow, RiskMatrix });

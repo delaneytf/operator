@@ -1,13 +1,18 @@
 // Questions log — tasks-style layout: metrics, search/filter, collapsible sections, expandable rows, modal edit.
 
 function QuestionsView({ state }) {
-  const [filterProject, setFilterProject] = React.useState('all');
+  const [filterIds, setFilterIds] = React.useState(new Set());
   const [search, setSearch] = React.useState('');
-  const [collapsed, setCollapsed] = React.useState({ resolved: true });
+  const [collapsed, setCollapsed] = React.useState({ resolved: true, cancelled: true });
   const [expandedId, setExpandedId] = React.useState(null);
   const [modalId, setModalId] = React.useState(null);
   const [showModal, setShowModal] = React.useState(false);
   const [resolveId, setResolveId] = React.useState(null);
+
+  const isAllFilter = filterIds.size === 0;
+  const visibleProjectIds = isAllFilter ? null : new Set(
+    (state.projects || []).filter(p => filterIds.has(p.programId) || filterIds.has(p.id)).map(p => p.id)
+  );
 
   const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
@@ -18,16 +23,17 @@ function QuestionsView({ state }) {
   const allQ = (state.notes || []).filter((n) => n.kind === 'question');
 
   const filtered = allQ
-    .filter((n) => filterProject === 'all' || (n.projectIds || [n.projectId]).filter(Boolean).includes(filterProject))
+    .filter((n) => !visibleProjectIds || (n.projectIds || [n.projectId]).filter(Boolean).some(pid => visibleProjectIds.has(pid)))
     .filter((n) => !search || n.title.toLowerCase().includes(search.toLowerCase())
       || (n.body || '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-  const open = filtered.filter((n) => !n.resolved);
-  const resolved = filtered.filter((n) => n.resolved);
+  const open = filtered.filter((n) => !n.resolved && !n.cancelled);
+  const resolved = filtered.filter((n) => n.resolved && !n.cancelled);
+  const cancelled = filtered.filter((n) => n.cancelled);
 
   // Metrics across all questions
-  const metricOpen = allQ.filter((n) => !n.resolved).length;
+  const metricOpen = allQ.filter((n) => !n.resolved && !n.cancelled).length;
   const metricResolved = allQ.filter((n) => n.resolved).length;
   const metricTotal = allQ.length;
   const metricThisWeek = allQ.filter((n) => (n.date || '') >= weekAgoStr).length;
@@ -66,15 +72,12 @@ function QuestionsView({ state }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
         <input className="input" placeholder="Search questions…" value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ fontSize: 12, width: 200, flexShrink: 0 }} />
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
-          <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All</button>
-          {state.projects.map((p) => (
-            <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
-              onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
-              {p.code}
-            </button>
-          ))}
-        </div>
+        <ProjectFilterDropdown
+          programs={state.programs || []}
+          projects={state.projects || []}
+          selectedIds={filterIds}
+          onChange={setFilterIds}
+        />
       </div>
 
       <div className="card">
@@ -113,12 +116,29 @@ function QuestionsView({ state }) {
             ))}
           </div>
         )}
+
+        {cancelled.length > 0 && (
+          <div>
+            <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('cancelled')}>
+              <Icon name={collapsed['cancelled'] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+              <span style={{ color: 'var(--fg-4)' }}>Cancelled</span>
+              <span className="tgroup-head-count">{cancelled.length}</span>
+            </div>
+            {!collapsed['cancelled'] && cancelled.map((n) => (
+              <QuestionRow key={n.id} note={n} projects={state.projects}
+                expanded={expandedId === n.id}
+                onToggleExpand={() => toggleExpand(n.id)}
+                onEdit={() => openModal(n.id)}
+                onResolve={() => setResolveId(n.id)} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
 
     {showModal && (
       <QuestionModal noteId={modalId} state={state}
-        defaults={{ projectId: filterProject !== 'all' ? filterProject : undefined }}
+        defaults={{ projectId: visibleProjectIds?.size === 1 ? [...visibleProjectIds][0] : undefined }}
         onClose={() => { setShowModal(false); setModalId(null); }} />
     )}
     {resolveId && (

@@ -3,7 +3,7 @@
 const TASK_PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 
 function TasksView({ state }) {
-  const [filterProject, setFilterProject] = React.useState('all');
+  const [filterIds, setFilterIds] = React.useState(new Set());
   const [search, setSearch] = React.useState('');
   const [groupBy, setGroupBy] = React.useState('priority'); // 'priority' | 'due'
   const [collapsed, setCollapsed] = React.useState({});
@@ -11,6 +11,11 @@ function TasksView({ state }) {
   const [taskModalId, setTaskModalId] = React.useState(null);
   const [showNewTask, setShowNewTask] = React.useState(false);
   const [readOnlyTaskId, setReadOnlyTaskId] = React.useState(null);
+
+  const isAllFilter = filterIds.size === 0;
+  const visibleProjectIds = isAllFilter ? null : new Set(
+    (state.projects || []).filter(p => filterIds.has(p.programId) || filterIds.has(p.id)).map(p => p.id)
+  );
 
   const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
@@ -52,7 +57,7 @@ function TasksView({ state }) {
 
   // Metrics
   const allTasks = state.tasks || [];
-  const openTasks = allTasks.filter((t) => t.status !== 'done');
+  const openTasks = allTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
   const metricTodo      = allTasks.filter((t) => t.status === 'todo').length;
   const metricInProg    = allTasks.filter((t) => t.status === 'in-progress').length;
   const metricBlocked   = allTasks.filter((t) =>
@@ -81,7 +86,7 @@ function TasksView({ state }) {
 
   // Filtered set
   const filtered = allTasks
-    .filter((t) => filterProject === 'all' || t.projectId === filterProject)
+    .filter((t) => !visibleProjectIds || visibleProjectIds.has(t.projectId))
     .filter((t) => !search || t.title.toLowerCase().includes(search.toLowerCase()) || (t.description || '').toLowerCase().includes(search.toLowerCase()));
 
   // Sections
@@ -92,7 +97,7 @@ function TasksView({ state }) {
       label: p.charAt(0).toUpperCase() + p.slice(1),
       labelColor: { critical: 'var(--danger)', high: 'var(--warn)', medium: 'var(--fg-2)', low: 'var(--fg-4)' }[p],
       tasks: sortByOrder(
-        filtered.filter((t) => t.priority === p && t.status !== 'done')
+        filtered.filter((t) => t.priority === p && t.status !== 'done' && t.status !== 'cancelled')
           .sort((a, b) => (a.dueDate ? daysFromToday(a.dueDate) : 999) - (b.dueDate ? daysFromToday(b.dueDate) : 999))
       ),
     })).filter((s) => s.tasks.length > 0);
@@ -100,9 +105,13 @@ function TasksView({ state }) {
     if (doneTasks.length > 0) {
       byPrio.push({ key: 'done', label: 'Done', labelColor: 'var(--ok)', tasks: doneTasks, defaultCollapsed: true });
     }
+    const cancelledTasks = sortByOrder(filtered.filter((t) => t.status === 'cancelled'));
+    if (cancelledTasks.length > 0) {
+      byPrio.push({ key: 'cancelled', label: 'Cancelled', labelColor: 'var(--fg-4)', tasks: cancelledTasks, defaultCollapsed: true });
+    }
     sections = byPrio;
   } else {
-    const open = filtered.filter((t) => t.status !== 'done');
+    const open = filtered.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
     const byPrioSort = (a, b) => (TASK_PRIORITY_ORDER[a.priority] ?? 2) - (TASK_PRIORITY_ORDER[b.priority] ?? 2);
     sections = [
       { key: 'overdue',  label: 'Overdue',       labelColor: 'var(--danger)', tasks: sortByOrder(open.filter((t) => t.dueDate && daysFromToday(t.dueDate) < 0).sort(byPrioSort)) },
@@ -111,6 +120,7 @@ function TasksView({ state }) {
       { key: 'later',    label: 'Later',          labelColor: 'var(--fg-3)',   tasks: sortByOrder(open.filter((t) => t.dueDate && daysFromToday(t.dueDate) > 7).sort(byPrioSort)) },
       { key: 'nodue',    label: 'No due date',    labelColor: 'var(--fg-4)',   tasks: sortByOrder(open.filter((t) => !t.dueDate).sort(byPrioSort)) },
       { key: 'done',     label: 'Done',           labelColor: 'var(--ok)',     tasks: sortByOrder(filtered.filter((t) => t.status === 'done')), defaultCollapsed: true },
+      { key: 'cancelled',label: 'Cancelled',      labelColor: 'var(--fg-4)',   tasks: sortByOrder(filtered.filter((t) => t.status === 'cancelled')), defaultCollapsed: true },
     ].filter((s) => s.tasks.length > 0);
   }
 
@@ -147,18 +157,16 @@ function TasksView({ state }) {
       </div>
 
       {/* Controls */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
         <input className="input" placeholder="Search tasks…" value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ fontSize: 12, width: 200, flexShrink: 0 }} />
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
-          <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All</button>
-          {state.projects.map((p) => (
-            <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
-              onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
-              {p.code}
-            </button>
-          ))}
-        </div>
+        <ProjectFilterDropdown
+          programs={state.programs || []}
+          projects={state.projects || []}
+          selectedIds={filterIds}
+          onChange={setFilterIds}
+        />
+        <div style={{ flex: 1 }} />
         <div className="seg" style={{ flexShrink: 0 }}>
           <button type="button" className={`seg-btn${groupBy === 'priority' ? ' active' : ''}`} onClick={() => setGroupBy('priority')}>Priority</button>
           <button type="button" className={`seg-btn${groupBy === 'due' ? ' active' : ''}`} onClick={() => setGroupBy('due')}>Due date</button>
@@ -197,7 +205,7 @@ function TasksView({ state }) {
 
     {showNewTask && (
       <TaskModal taskId={null} state={state}
-        defaults={{ projectId: filterProject !== 'all' ? filterProject : undefined }}
+        defaults={{ projectId: visibleProjectIds?.size === 1 ? [...visibleProjectIds][0] : undefined }}
         onClose={() => setShowNewTask(false)} />
     )}
     {taskModalId && (

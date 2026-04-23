@@ -1,13 +1,18 @@
 // Decisions log — tasks-style layout: metrics, search/filter, collapsible sections, expandable rows, modal edit.
 
 function DecisionsView({ state }) {
-  const [filterProject, setFilterProject] = React.useState('all');
+  const [filterIds, setFilterIds] = React.useState(new Set());
   const [search, setSearch] = React.useState('');
   const [groupBy, setGroupBy] = React.useState('quarter'); // 'quarter' | 'reversibility'
-  const [collapsed, setCollapsed] = React.useState({});
+  const [collapsed, setCollapsed] = React.useState({ cancelled: true });
   const [expandedId, setExpandedId] = React.useState(null);
   const [modalId, setModalId] = React.useState(null);
   const [showModal, setShowModal] = React.useState(false);
+
+  const isAllFilter = filterIds.size === 0;
+  const visibleProjectIds = isAllFilter ? null : new Set(
+    (state.projects || []).filter(p => filterIds.has(p.programId) || filterIds.has(p.id)).map(p => p.id)
+  );
 
   const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
@@ -22,7 +27,7 @@ function DecisionsView({ state }) {
   const allDecisions = (state.notes || []).filter((n) => n.kind === 'decision');
 
   const filtered = allDecisions
-    .filter((n) => filterProject === 'all' || n.projectId === filterProject)
+    .filter((n) => !visibleProjectIds || visibleProjectIds.has(n.projectId))
     .filter((n) => !search || n.title.toLowerCase().includes(search.toLowerCase())
       || (n.body || '').toLowerCase().includes(search.toLowerCase())
       || (n.context || '').toLowerCase().includes(search.toLowerCase()))
@@ -44,9 +49,9 @@ function DecisionsView({ state }) {
   // Build sections
   let sections;
   if (groupBy === 'quarter') {
-    const pinned = filtered.filter((n) => n.pinned);
+    const pinned = filtered.filter((n) => n.pinned && !n.cancelled);
     const byQ = {};
-    filtered.filter((n) => !n.pinned).forEach((n) => {
+    filtered.filter((n) => !n.pinned && !n.cancelled).forEach((n) => {
       const q = getQuarter(n.date || todayIso);
       (byQ[q] = byQ[q] || []).push(n);
     });
@@ -56,11 +61,15 @@ function DecisionsView({ state }) {
       sections.push({ key: q, label: q, labelColor: 'var(--fg-3)', items: byQ[q] });
     });
   } else {
-    const irreversible = filtered.filter((n) => n.reversibility === 'irreversible');
-    const reversible = filtered.filter((n) => n.reversibility !== 'irreversible');
+    const irreversible = filtered.filter((n) => n.reversibility === 'irreversible' && !n.cancelled);
+    const reversible = filtered.filter((n) => n.reversibility !== 'irreversible' && !n.cancelled);
     sections = [];
     if (irreversible.length > 0) sections.push({ key: 'irreversible', label: 'Irreversible', labelColor: 'var(--danger)', items: irreversible });
     if (reversible.length > 0) sections.push({ key: 'reversible', label: 'Reversible', labelColor: 'var(--fg-3)', items: reversible });
+  }
+  const cancelledDecisions = filtered.filter((n) => n.cancelled);
+  if (cancelledDecisions.length > 0) {
+    sections.push({ key: 'cancelled', label: 'Cancelled', labelColor: 'var(--fg-4)', items: cancelledDecisions });
   }
 
   const openModal = (id) => { setModalId(id || null); setShowModal(true); };
@@ -87,18 +96,16 @@ function DecisionsView({ state }) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
         <input className="input" placeholder="Search decisions…" value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ fontSize: 12, width: 200, flexShrink: 0 }} />
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
-          <button className={`btn btn-sm${filterProject === 'all' ? ' btn-primary' : ''}`} onClick={() => setFilterProject('all')}>All</button>
-          {state.projects.map((p) => (
-            <button key={p.id} className={`btn btn-sm${filterProject === p.id ? ' btn-primary' : ''}`}
-              onClick={() => setFilterProject(filterProject === p.id ? 'all' : p.id)}>
-              {p.code}
-            </button>
-          ))}
-        </div>
+        <ProjectFilterDropdown
+          programs={state.programs || []}
+          projects={state.projects || []}
+          selectedIds={filterIds}
+          onChange={setFilterIds}
+        />
+        <div style={{ flex: 1 }} />
         <div className="seg" style={{ flexShrink: 0 }}>
           <button type="button" className={`seg-btn${groupBy === 'quarter' ? ' active' : ''}`} onClick={() => setGroupBy('quarter')}>Quarter</button>
           <button type="button" className={`seg-btn${groupBy === 'reversibility' ? ' active' : ''}`} onClick={() => setGroupBy('reversibility')}>Reversibility</button>
@@ -133,7 +140,7 @@ function DecisionsView({ state }) {
       <DecisionModal
         noteId={modalId}
         state={state}
-        defaults={{ projectId: filterProject !== 'all' ? filterProject : undefined }}
+        defaults={{ projectId: visibleProjectIds?.size === 1 ? [...visibleProjectIds][0] : undefined }}
         onClose={() => { setShowModal(false); setModalId(null); }}
       />
     )}
@@ -161,7 +168,7 @@ function DecisionRow({ note, project, expanded, onToggleExpand, onEdit }) {
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {note.reversibility === 'irreversible'
             ? <span className="pill pill-danger" style={{ fontSize: 10, padding: '1px 6px' }}>irreversible</span>
-            : <span className="pill" style={{ fontSize: 10, padding: '1px 6px' }}>reversible</span>}
+            : <span className="pill pill-ghost" style={{ fontSize: 10, padding: '1px 6px' }}>reversible</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <ProjectChip project={project} />

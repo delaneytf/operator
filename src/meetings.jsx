@@ -5,11 +5,16 @@ const MTG_RECURRENCE = { none: 'One-time', weekly: 'Weekly', biweekly: 'Biweekly
 function MeetingsView({ state, onOpenProject, onOpenTask }) {
   const allMeetings = (state.meetings || []).slice().sort((a, b) => b.date.localeCompare(a.date));
   const [search, setSearch] = React.useState('');
-  const [projectFilter, setProjectFilter] = React.useState(null);
+  const [filterIds, setFilterIds] = React.useState(new Set());
   const [collapsed, setCollapsed] = React.useState({ past: false });
   const [expandedId, setExpandedId] = React.useState(null);
   const [formModalId, setFormModalId] = React.useState(undefined); // undefined=closed, null=new, string=edit
   const [detailModalId, setDetailModalId] = React.useState(null);
+
+  const isAllFilter = filterIds.size === 0;
+  const visibleProjectIds = isAllFilter ? null : new Set(
+    (state.projects || []).filter(p => filterIds.has(p.programId) || filterIds.has(p.id)).map(p => p.id)
+  );
 
   const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
@@ -24,7 +29,7 @@ function MeetingsView({ state, onOpenProject, onOpenTask }) {
   const todayIso = new Date().toISOString().slice(0, 10);
 
   const filtered = allMeetings.filter((m) => {
-    if (projectFilter && !(m.projectIds || []).includes(projectFilter)) return false;
+    if (visibleProjectIds && !(m.projectIds || []).some(pid => visibleProjectIds.has(pid))) return false;
     if (search) {
       const q = search.toLowerCase();
       return m.title.toLowerCase().includes(q)
@@ -76,15 +81,12 @@ function MeetingsView({ state, onOpenProject, onOpenTask }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
         <input className="input" placeholder="Search meetings…" value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ fontSize: 12, width: 200, flexShrink: 0 }} />
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
-          <button className={`btn btn-sm${!projectFilter ? ' btn-primary' : ''}`} onClick={() => setProjectFilter(null)}>All</button>
-          {state.projects.map((p) => (
-            <button key={p.id} className={`btn btn-sm${projectFilter === p.id ? ' btn-primary' : ''}`}
-              onClick={() => setProjectFilter(projectFilter === p.id ? null : p.id)}>
-              {p.code}
-            </button>
-          ))}
-        </div>
+        <ProjectFilterDropdown
+          programs={state.programs || []}
+          projects={state.projects || []}
+          selectedIds={filterIds}
+          onChange={setFilterIds}
+        />
       </div>
 
       <div className="card">
