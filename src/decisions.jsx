@@ -332,4 +332,4 @@ function DecisionModal({ noteId, state, defaults, onClose }) {
   );
 }
 
-Object.assign(window, { DecisionsView });
+Object.assign(window, { DecisionsView, DecisionRow, DecisionModal });

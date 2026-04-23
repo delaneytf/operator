@@ -551,10 +551,10 @@ function RoadmapView({ state }) {
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="roadmap" style={{ height: 'auto', overflow: 'visible' }}>
+    <div className="content-narrow">
 
       {/* Page header — matches Tasks / Risks / Portfolio pattern */}
-      <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+      <div style={{ borderBottom: '1px solid var(--line)', paddingBottom: 16, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
             <div className="title-h1">Project roadmap</div>

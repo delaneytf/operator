@@ -11,7 +11,7 @@ const RISK_FIELDS_ALL = [
   { key: 'reviewDate',  label: 'Next review date',       hint: 'When to next review this risk' },
 ];
 
-const RISK_FIELDS_DEFAULT = ['category', 'response'];
+const RISK_FIELDS_DEFAULT = ['category', 'response', 'description', 'impact', 'trigger', 'contingency', 'dueDate', 'reviewDate'];
 
 const RISK_CATEGORIES = ['Technical', 'Financial', 'Schedule', 'Resource', 'External', 'Compliance'];
 const RISK_RESPONSES  = ['Reduce', 'Avoid', 'Accept', 'Transfer'];

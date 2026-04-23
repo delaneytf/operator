@@ -392,4 +392,4 @@ function ResolveQuestionModal({ noteId, state, onClose }) {
   );
 }
 
-Object.assign(window, { QuestionsView });
+Object.assign(window, { QuestionsView, QuestionRow, QuestionModal, ResolveQuestionModal });

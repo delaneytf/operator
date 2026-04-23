@@ -131,6 +131,7 @@ function Icon({ name, size = 14, className = '' }) {
   const paths = {
     check: <polyline points="3 8 6.5 11.5 13 4.5" />,
     plus: <><line x1="8" y1="3" x2="8" y2="13" /><line x1="3" y1="8" x2="13" y2="8" /></>,
+    minus: <line x1="3" y1="8" x2="13" y2="8" />,
     dot: <circle cx="8" cy="8" r="2.5" fill={stroke} stroke="none" />,
     circle: <circle cx="8" cy="8" r="5" />,
     chevronR: <polyline points="6 3 11 8 6 13" />,

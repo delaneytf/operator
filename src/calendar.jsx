@@ -243,7 +243,7 @@ function CalendarView({ state, onOpenMeeting }) {
   ) : null;
 
   return (
-    <div>
+    <div className="content-narrow">
       <div className="cal-toolbar">
         {/* Row 1: navigation */}
         <div className="row-flex">

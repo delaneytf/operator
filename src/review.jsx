@@ -18,11 +18,10 @@ function ReviewView({ state }) {
     const reactive = completed.filter((t) => t.source === 'reactive').length;
     const plannedRatio = completed.length ? planned / completed.length : 0;
 
-    // Cycle time from createdAt -> completedAt for done in window.
-    const cycles = completed
-      .filter((t) => t.createdAt && t.completedAt)
-      .map((t) => daysBetween(t.createdAt, t.completedAt));
-    const cycleTime = cycles.length ? (cycles.reduce((a, b) => a + b, 0) / cycles.length).toFixed(1) : '0';
+    // On-time rate: % of completed tasks (with a due date) finished on or before due.
+    const withDue = completed.filter((t) => t.dueDate);
+    const onTime = withDue.filter((t) => t.completedAt <= t.dueDate).length;
+    const onTimeRate = withDue.length ? Math.round((onTime / withDue.length) * 100) : null;
 
     setDraft({
       weekOf: weekStartStr,
@@ -30,7 +29,7 @@ function ReviewView({ state }) {
       delayed: delayed.length,
       blocked: blocked.length,
       plannedRatio,
-      cycleTime: parseFloat(cycleTime),
+      onTimeRate: onTimeRate,
       completedTasks: completed,
       delayedTasks: delayed,
       blockedTasks: blocked,
@@ -41,17 +40,17 @@ function ReviewView({ state }) {
 
   const history = state.weeklyReviews;
   const completionSpark = history.slice().reverse().map((r) => r.completed);
-  const cycleSpark = history.slice().reverse().map((r) => r.cycleTime);
+  const onTimeSpark = history.slice().reverse().map((r) => r.onTimeRate ?? 0);
   const plannedSpark = history.slice().reverse().map((r) => r.plannedRatio * 100);
 
   // Live metrics
   const allCompleted = state.tasks.filter((t) => t.status === 'done').length;
   const totalTasks = state.tasks.length;
   const completionRate = totalTasks ? Math.round((allCompleted / totalTasks) * 100) : 0;
-  const recentCycles = state.tasks
-    .filter((t) => t.status === 'done' && t.createdAt && t.completedAt)
-    .map((t) => daysBetween(t.createdAt, t.completedAt));
-  const avgCycle = recentCycles.length ? (recentCycles.reduce((a, b) => a + b, 0) / recentCycles.length).toFixed(1) : '0';
+  const doneTasks = state.tasks.filter((t) => t.status === 'done');
+  const doneWithDue = doneTasks.filter((t) => t.dueDate);
+  const doneOnTime = doneWithDue.filter((t) => t.completedAt && t.completedAt <= t.dueDate).length;
+  const onTimeRateLive = doneWithDue.length ? Math.round((doneOnTime / doneWithDue.length) * 100) : 0;
   const plannedVsReactive = (() => {
     const done = state.tasks.filter((t) => t.status === 'done');
     if (!done.length) return { plannedPct: 0, planned: 0, reactive: 0 };
@@ -78,9 +77,9 @@ function ReviewView({ state }) {
           <span className="metric-delta">{allCompleted} / {totalTasks} all-time</span>
         </div>
         <div className="metric-cell">
-          <span className="metric-label">Avg cycle time</span>
-          <span className="metric-val">{avgCycle}<span style={{ fontSize: 13, color: 'var(--fg-3)' }}>d</span></span>
-          <span className="metric-delta">{recentCycles.length} completed tasks</span>
+          <span className="metric-label">On-time rate</span>
+          <span className="metric-val">{onTimeRateLive}<span style={{ fontSize: 13, color: 'var(--fg-3)' }}>%</span></span>
+          <span className="metric-delta">{doneOnTime} / {doneWithDue.length} with due dates</span>
         </div>
         <div className="metric-cell">
           <span className="metric-label">Planned work</span>
@@ -102,7 +101,7 @@ function ReviewView({ state }) {
           </div>
           <div style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
             <TrendCell label="Completed / week" values={completionSpark} latest={history[0].completed} />
-            <TrendCell label="Cycle time (days)" values={cycleSpark} latest={history[0].cycleTime} tone="ok" />
+            <TrendCell label="On-time %" values={onTimeSpark} latest={`${history[0].onTimeRate ?? 0}%`} tone="ok" />
             <TrendCell label="Planned %" values={plannedSpark} latest={`${Math.round(history[0].plannedRatio * 100)}%`} tone="ok" />
           </div>
         </div>
@@ -192,7 +191,7 @@ function ReviewView({ state }) {
                   delayed: draft.delayed,
                   blocked: draft.blocked,
                   plannedRatio: draft.plannedRatio,
-                  cycleTime: draft.cycleTime,
+                  onTimeRate: draft.onTimeRate,
                   note: draft.note,
                   completedTasks: draft.completedTasks,
                   delayedTasks: draft.delayedTasks,
@@ -262,9 +261,9 @@ function ReviewView({ state }) {
                       </div>
                       <div className="bar-compare">
                         <div className="bar-compare-bar">
-                          <div className="bar-compare-fill" style={{ width: `${Math.min(100, r.cycleTime * 20)}%`, background: 'var(--accent)' }} />
+                          <div className="bar-compare-fill" style={{ width: `${r.onTimeRate ?? 0}%`, background: 'var(--accent)' }} />
                         </div>
-                        <span className="mono" style={{ fontSize: 11 }}>{r.cycleTime}d cycle</span>
+                        <span className="mono" style={{ fontSize: 11 }}>{r.onTimeRate ?? 0}% on time</span>
                       </div>
                       {(earlyCount > 0 || lateCount > 0) && (
                         <div style={{ marginTop: 8, fontSize: 11.5 }}>

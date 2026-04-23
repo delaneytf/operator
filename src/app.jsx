@@ -14,10 +14,14 @@ function App() {
 
   // Apply theme + density to <body>
   React.useEffect(() => {
-    document.body.className = `theme-${state.meta.theme} density-${state.meta.density}`;
+    document.body.className = `theme-${state.meta.theme} density-${state.meta.density}${state.meta.tableStyle === 'inverted' ? ' table-inverted' : ''}`;
     const hues = { amber: 38, rose: 20, sky: 230, violet: 300, emerald: 155 };
     document.documentElement.style.setProperty('--accent-h', hues[state.meta.accent] || 38);
-  }, [state.meta.theme, state.meta.density, state.meta.accent]);
+    const zoom = (state.meta.zoom || 100) / 100;
+    const root = document.getElementById('root');
+    root.style.zoom = zoom;
+    root.style.height = (100 / zoom) + 'vh';
+  }, [state.meta.theme, state.meta.density, state.meta.accent, state.meta.tableStyle, state.meta.zoom]);
 
   // Edit mode protocol
   React.useEffect(() => {
@@ -239,7 +243,7 @@ function App() {
               setView('project', proj.id);
             };
 
-            const NewProjForm = ({ indented }) => (
+            const renderNewProjForm = (indented) => (
               <form className={`sb-new-proj-form${indented ? ' indented' : ''}`} onSubmit={submitNewProj}>
                 <input autoFocus className="input" style={{ fontSize: 12, padding: '4px 7px' }} placeholder="Project name"
                   value={newProjInput.name}
@@ -313,7 +317,7 @@ function App() {
                       {!collapsed && (
                         <div className="sb-program-inner">
                           {pgProjs.map(renderProj)}
-                          {newProjInput && newProjInput.programId === pg.id && <NewProjForm indented={false} />}
+                          {newProjInput && newProjInput.programId === pg.id && renderNewProjForm(false)}
                         </div>
                       )}
                     </React.Fragment>
@@ -327,7 +331,7 @@ function App() {
                 {ungrouped.map(renderProj)}
 
                 {/* New project form (ungrouped) */}
-                {newProjInput && newProjInput !== '__menu__' && newProjInput.programId == null && <NewProjForm indented={false} />}
+                {newProjInput && newProjInput !== '__menu__' && newProjInput.programId == null && renderNewProjForm(false)}
 
                 {/* New program form */}
                 {newProgInput && (
@@ -393,6 +397,10 @@ function App() {
               {state.meta.activeView === 'jira' && <strong>Jira</strong>}
               {state.meta.activeView === 'confluence' && <strong>Confluence</strong>}
               {state.meta.activeView === 'integrations' && <strong>Integrations</strong>}
+              {state.meta.activeView === 'program' && state.meta.activeProgramId && (() => {
+                const pg = (state.programs || []).find(p => p.id === state.meta.activeProgramId);
+                return pg ? <strong>{pg.name}</strong> : null;
+              })()}
               {state.meta.activeView === 'project' && activeProject && (
                 <>
                   <button className="btn btn-ghost btn-sm" onClick={() => setView('portfolio')}>Portfolio</button>
@@ -508,6 +516,29 @@ function TweaksPanel({ state, onClose }) {
           <div className="seg">
             {[['today', 'Today'], ['portfolio', 'Portfolio'], ['calendar', 'Calendar']].map(([v, l]) =>
               <button key={v} className={`seg-btn ${state.meta.activeView === v ? 'active' : ''}`} onClick={() => actions.setMeta({ activeView: v })}>{l}</button>
+            )}
+          </div>
+        </div>
+        <div className="tweak-row">
+          <span className="tweak-row-label">Table style</span>
+          <div className="seg">
+            {[['default', 'Light headers'], ['inverted', 'Grey headers']].map(([v, l]) =>
+              <button key={v} className={`seg-btn ${(state.meta.tableStyle || 'default') === v ? 'active' : ''}`} onClick={() => actions.setMeta({ tableStyle: v })}>{l}</button>
+            )}
+          </div>
+        </div>
+        <div className="tweak-row">
+          <span className="tweak-row-label">Zoom</span>
+          <div className="row-flex" style={{ gap: 8, alignItems: 'center' }}>
+            <button className="icon-btn" title="Zoom out" onClick={() => actions.setMeta({ zoom: Math.max(50, (state.meta.zoom || 100) - 10) })}>
+              <Icon name="minus" size={11} />
+            </button>
+            <span className="mono" style={{ fontSize: 11, minWidth: 32, textAlign: 'center' }}>{state.meta.zoom || 100}%</span>
+            <button className="icon-btn" title="Zoom in" onClick={() => actions.setMeta({ zoom: Math.min(150, (state.meta.zoom || 100) + 10) })}>
+              <Icon name="plus" size={11} />
+            </button>
+            {(state.meta.zoom || 100) !== 100 && (
+              <button className="btn btn-sm" style={{ fontSize: 10, padding: '1px 6px' }} onClick={() => actions.setMeta({ zoom: 100 })}>Reset</button>
             )}
           </div>
         </div>

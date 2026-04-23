@@ -317,6 +317,10 @@ const actions = {
           updated.completedDate = today;
           updated.daysEarlyLate = Math.round((new Date(m.date) - new Date(today)) / 86400000);
         }
+        if (patch.status && patch.status !== 'done' && m.status === 'done') {
+          updated.completedDate = null;
+          updated.daysEarlyLate = null;
+        }
         return updated;
       }),
     }));

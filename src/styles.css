@@ -86,7 +86,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; }
+html, body { height: 100%; }
+#root { height: 100%; }
 body {
   margin: 0;
   font-family: var(--font-ui);
@@ -432,7 +433,7 @@ textarea.inline-edit-input {
 .content {
   flex: 1;
   overflow: auto;
-  padding: 18px 22px 80px;
+  padding: 18px 22px 22px;
   min-height: 0;
 }
 .content-narrow { max-width: 1180px; margin: 0 auto; }
@@ -633,6 +634,7 @@ textarea.inline-edit-input {
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-md);
   cursor: pointer;
+  background: var(--bg-1);
 }
 .trow:hover { background: var(--bg-hover); }
 .trow:last-child { border-bottom: none; }
@@ -666,7 +668,7 @@ textarea.inline-edit-input {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   border-top: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--bg-1);
 }
 .tgroup-head:first-child { border-top: none; }
 .tgroup-head-count { color: var(--fg-4); }
@@ -684,6 +686,29 @@ textarea.inline-edit-input {
   border-left: 3px solid var(--accent);
   padding: 12px 14px 12px 68px;
 }
+
+/* Inverted table style: mirror of default gradient levels */
+/* Default:  card-head=--bg  trow=--bg-1  detail=--bg-2  (light→dark) */
+/* Inverted: card-head=--bg-3  trow=--bg-1  detail=--bg  (dark→light) */
+.table-inverted .card { background: var(--bg-1); }
+.table-inverted .card-head { background: var(--bg-3); }
+.table-inverted .tgroup-head { background: var(--bg-2); }
+.table-inverted .trow { background: var(--bg-1); }
+.table-inverted .pq-row-active { background: var(--bg); }
+.table-inverted .pq-detail { background: var(--bg); }
+.table-inverted .trow:hover { background: var(--bg-hover); }
+.timing-cell { background: var(--bg-1); }
+.table-inverted .timing-cell { background: var(--bg); }
+.table-inverted .prow-done-row-child { background: var(--bg); }
+.table-inverted .prow-children { background: var(--bg); }
+
+/* Headless cards (no card-head): shallower gradient starting at tgroup-head */
+.card:not(:has(.card-head)) .tgroup-head { background: var(--bg); border-top: none; }
+.card:not(:has(.card-head)) .trow { background: var(--bg-1); }
+.card:not(:has(.card-head)) .pq-detail { background: var(--bg-2); }
+.table-inverted .card:not(:has(.card-head)) .tgroup-head { background: var(--bg-3); }
+.table-inverted .card:not(:has(.card-head)) .trow { background: var(--bg-2); }
+.table-inverted .card:not(:has(.card-head)) .pq-detail { background: var(--bg-1); }
 
 /* Header row: meta strip + edit button */
 .pq-meta-row {
@@ -1113,11 +1138,12 @@ textarea.inline-edit-input {
 .timeline {
   position: relative;
   padding: 6px 14px 14px;
+  width: 80%;
+  margin: 0 auto;
 }
 .timeline-track {
   position: relative;
   min-height: 100px;
-  border-top: 1px dashed var(--line);
   margin-top: 24px;
   /* paddingTop/Bottom set inline to reserve space for callouts */
 }
@@ -1267,9 +1293,9 @@ textarea.inline-edit-input {
 /* Milestone list */
 .ms-row {
   display: grid;
-  grid-template-columns: 18px 1fr 90px 80px 22px;
-  gap: 10px;
-  padding: 8px 14px;
+  grid-template-columns: 18px 1fr auto 80px 22px;
+  gap: 14px;
+  padding: 10px 18px;
   align-items: center;
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-md);
@@ -1813,7 +1839,7 @@ textarea.inline-edit-input {
 .plan-cta {
   margin-top: 18px; padding: 14px 16px;
   display: flex; justify-content: space-between; align-items: center;
-  background: var(--bg-2); border: 1px dashed var(--line-2); border-radius: 10px;
+  background: var(--accent-soft); border: 1px dashed var(--accent); border-radius: 10px;
 }
 .plan-cta-title { font-weight: 600; }
 .plan-cta-sub { color: var(--fg-3); font-size: 12px; margin-top: 2px; }

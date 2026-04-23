@@ -119,9 +119,20 @@ function ProgramView({ state, programId, onOpenProject }) {
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
           Projects — {activeProjects.length} active
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
           {sortedProjects.length === 0 && (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--fg-4)', fontSize: 12 }}>No projects in this program yet.</div>
+          )}
+          {sortedProjects.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '10px 28px 1fr 180px 36px 36px 70px', alignItems: 'center', padding: '6px 14px', borderBottom: '1px solid var(--line)', gap: '0 12px' }}>
+              <span />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Code</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Project</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Next milestone</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tasks</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Risk</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Due</span>
+            </div>
           )}
           {sortedProjects.map(p => {
             const ms = allMilestones.filter(m => m.projectId === p.id);
@@ -132,22 +143,23 @@ function ProgramView({ state, programId, onOpenProject }) {
             const deps = (p.dependsOn || []).map(did => (state.projects || []).find(x => x.id === did)).filter(Boolean);
 
             return (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--bg-1)', borderBottom: '1px solid var(--line-2)', cursor: 'pointer' }}
+              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '10px 28px 1fr 180px 36px 36px 70px', alignItems: 'center', gap: '0 12px', padding: '10px 14px', background: 'var(--bg-1)', borderBottom: '1px solid var(--line-2)', cursor: 'pointer' }}
                 onClick={() => onOpenProject(p.id)}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-1)'}
               >
-                {/* Status dot + code */}
+                {/* Status dot */}
                 <span className={`sb-proj-dot pc-${p.status}`} style={{ flexShrink: 0 }} />
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)', flexShrink: 0, width: 28 }}>{p.code}</span>
 
-                {/* Name */}
-                <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Code */}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>{p.code}</span>
+
+                {/* Name + progress */}
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.name.split('—')[1]?.trim() || p.name}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {/* Progress bar */}
                     <div style={{ width: 80, height: 4, borderRadius: 2, background: 'var(--line)', overflow: 'hidden', flexShrink: 0 }}>
                       <div style={{ width: `${donePct}%`, height: '100%', background: p.status === 'blocked' ? 'var(--danger)' : p.status === 'at-risk' ? 'var(--warn)' : 'var(--ok)', borderRadius: 2 }} />
                     </div>
@@ -160,20 +172,26 @@ function ProgramView({ state, programId, onOpenProject }) {
                   </div>
                 </div>
 
-                {/* Meta */}
-                <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexShrink: 0 }}>
-                  {nextMs && (
-                    <div style={{ fontSize: 11, color: 'var(--fg-3)', textAlign: 'right' }}>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-4)' }}>next milestone</div>
-                      <div>{nextMs.name}</div>
+                {/* Next milestone */}
+                <div style={{ minWidth: 0 }}>
+                  {nextMs ? (
+                    <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextMs.name}</div>
                       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5 }}>{fmtDate(nextMs.date)}</div>
                     </div>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>—</span>
                   )}
-                  {openT > 0 && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>{openT}t</span>}
-                  {highRisks > 0 && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--danger)' }}>⚠ {highRisks}</span>}
-                  {p.owner && <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>{p.owner}</span>}
-                  {p.dueDate && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{fmtDate(p.dueDate)}</span>}
                 </div>
+
+                {/* Open tasks */}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: openT > 0 ? 'var(--fg-4)' : 'var(--fg-4)' }}>{openT > 0 ? openT : '—'}</span>
+
+                {/* High risks */}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: highRisks > 0 ? 'var(--danger)' : 'var(--fg-4)' }}>{highRisks > 0 ? `⚠ ${highRisks}` : '—'}</span>
+
+                {/* Due date */}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{p.dueDate ? fmtDate(p.dueDate) : '—'}</span>
               </div>
             );
           })}

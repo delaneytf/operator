@@ -116,16 +116,18 @@ function ProjectTaskAddForm({ project, onDone }) {
 function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const project = state.projects.find((p) => p.id === projectId);
   const [tab, setTab] = React.useState('overview');
-  const [addingTask, setAddingTask] = React.useState(false);
-  const [readOnlyTaskId, setReadOnlyTaskId] = React.useState(null);
   const [closeConfirming, setCloseConfirming] = React.useState(false);
   const [completionBlocker, setCompletionBlocker] = React.useState(null);
+  const [editingHeader, setEditingHeader] = React.useState(false);
 
   if (!project) return <EmptyState title="Project not found" />;
 
   const tasks = state.tasks.filter((t) => t.projectId === projectId);
   const openTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
   const notes = state.notes.filter((n) => n.projectId === projectId && n.kind !== 'artifact');
+  const projNotes = notes.filter((n) => n.kind === 'note');
+  const projDecisions = notes.filter((n) => n.kind === 'decision');
+  const projQuestions = notes.filter((n) => n.kind === 'question');
   const artifacts = state.notes.filter((n) => n.projectId === projectId && n.kind === 'artifact');
   const milestones = state.milestones.filter((m) => m.projectId === projectId);
   const risks = state.risks.filter((r) => r.projectId === projectId);
@@ -137,7 +139,9 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
     { id: 'overview',   label: 'Overview',   icon: 'target' },
     { id: 'tasks',      label: 'Tasks',      icon: 'list',     count: openTasks.length },
     { id: 'milestones', label: 'Milestones', icon: 'flag',     count: milestones.filter((m) => m.status !== 'done' && m.status !== 'cancelled').length },
-    { id: 'notes',      label: 'Notes',      icon: 'note',     count: notes.length },
+    { id: 'notes',      label: 'Notes',      icon: 'note',     count: projNotes.length },
+    { id: 'decisions',  label: 'Decisions',  icon: 'note',     count: projDecisions.length },
+    { id: 'questions',  label: 'Questions',  icon: 'search',   count: projQuestions.length },
     { id: 'artifacts',  label: 'Artifacts',  icon: 'link',     count: artifacts.length },
     { id: 'risks',      label: 'Risks',      icon: 'warn',     count: risks.filter((r) => r.status !== 'closed' && r.status !== 'cancelled').length },
     { id: 'meetings',   label: 'Meetings',   icon: 'clock',    count: meetings.length },
@@ -165,109 +169,133 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
       {/* Header */}
       <div className="row-flex-sb" style={{ marginBottom: 14, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="row-flex" style={{ marginBottom: 6 }}>
-            <span className="pcard-code">{project.code}</span>
-            <select
-              className="select proj-status-select"
-              style={{ padding: '2px 6px', fontSize: 11 }}
-              value={project.priority}
-              onChange={(e) => actions.updateProject(project.id, { priority: e.target.value })}
-            >
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <select
-              className="select proj-status-select"
-              style={{ padding: '2px 6px', fontSize: 11 }}
-              value={project.status}
-              onChange={(e) => {
-                const newStatus = e.target.value;
-                if (newStatus === 'closed') {
-                  if (project.status !== 'closed') setCloseConfirming(true);
-                  return;
-                }
-                if (newStatus === 'done') {
-                  const blockTasks = state.tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'cancelled');
-                  const blockMs = state.milestones.filter(m => m.projectId === project.id && m.status !== 'done' && m.status !== 'cancelled');
-                  const blockQs = state.notes.filter(n => n.projectId === project.id && n.kind === 'question' && !n.resolved);
-                  if (blockTasks.length || blockMs.length || blockQs.length) {
-                    setCompletionBlocker({ tasks: blockTasks, milestones: blockMs, questions: blockQs });
-                    return;
-                  }
-                  actions.updateProject(project.id, { status: 'done', completedDate: new Date().toISOString().slice(0, 10) });
-                  return;
-                }
-                actions.updateProject(project.id, { status: newStatus });
-              }}
-            >
-              <option value="on-track">On track</option>
-              <option value="at-risk">At risk</option>
-              <option value="blocked">Blocked</option>
-              <option value="done">Completed ✓</option>
-              <option value="closed">Closed</option>
-            </select>
-            {(state.programs || []).length > 0 && (
-              <select
-                className="select proj-status-select"
-                style={{ padding: '2px 6px', fontSize: 11 }}
-                value={project.programId || ''}
-                onChange={(e) => actions.updateProject(project.id, { programId: e.target.value || null })}
-              >
-                <option value="">No program</option>
-                {(state.programs || []).map((pg) => (
-                  <option key={pg.id} value={pg.id}>{pg.name}</option>
-                ))}
-              </select>
-            )}
-            {state.projects.filter(p => p.id !== project.id).length > 0 && (
-              <DependsOnSelect project={project} allProjects={state.projects} />
-            )}
-            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>Start</span>
-            <input
-              type="date"
-              className="input"
-              style={{ fontSize: 11, padding: '2px 6px', width: 130 }}
-              value={project.startDate || ''}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (!next || !project.startDate) { actions.updateProject(project.id, { startDate: next }); return; }
-                const delta = Math.round((new Date(next + 'T00:00:00') - new Date(project.startDate + 'T00:00:00')) / 86400000);
-                actions.shiftProjectDates(project.id, delta);
-              }}
-            />
-            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>→</span>
-            <input
-              type="date"
-              className="input"
-              style={{ fontSize: 11, padding: '2px 6px', width: 130 }}
-              value={project.dueDate || ''}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (!next || !project.dueDate) { actions.updateProject(project.id, { dueDate: next }); return; }
-                const delta = Math.round((new Date(next + 'T00:00:00') - new Date(project.dueDate + 'T00:00:00')) / 86400000);
-                actions.shiftProjectDates(project.id, delta);
-              }}
-            />
-          </div>
-          <div className="title-h1" style={{ marginBottom: 6 }}>
-            <InlineEdit
-              value={project.name}
-              onSave={(v) => actions.updateProject(project.id, { name: v })}
-              className="title-h1-edit"
-              placeholder="Project name"
-            />
-          </div>
-          <div className="title-sub" style={{ maxWidth: 760 }}>
-            <InlineEdit
-              value={project.objective}
-              onSave={(v) => actions.updateProject(project.id, { objective: v })}
-              multiline
-              className="title-sub-edit"
-              placeholder="Objective — what outcome does this project deliver?"
-            />
-          </div>
+          {editingHeader ? (
+            <>
+              <div className="row-flex" style={{ marginBottom: 6 }}>
+                <span className="pcard-code">{project.code}</span>
+                <select
+                  className="select proj-status-select"
+                  style={{ padding: '2px 6px', fontSize: 11 }}
+                  value={project.priority}
+                  onChange={(e) => actions.updateProject(project.id, { priority: e.target.value })}
+                >
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+                <select
+                  className="select proj-status-select"
+                  style={{ padding: '2px 6px', fontSize: 11 }}
+                  value={project.status}
+                  onChange={(e) => {
+                    const newStatus = e.target.value;
+                    if (newStatus === 'closed') {
+                      if (project.status !== 'closed') setCloseConfirming(true);
+                      return;
+                    }
+                    if (newStatus === 'done') {
+                      const blockTasks = state.tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'cancelled');
+                      const blockMs = state.milestones.filter(m => m.projectId === project.id && m.status !== 'done' && m.status !== 'cancelled');
+                      const blockQs = state.notes.filter(n => n.projectId === project.id && n.kind === 'question' && !n.resolved);
+                      if (blockTasks.length || blockMs.length || blockQs.length) {
+                        setCompletionBlocker({ tasks: blockTasks, milestones: blockMs, questions: blockQs });
+                        return;
+                      }
+                      actions.updateProject(project.id, { status: 'done', completedDate: new Date().toISOString().slice(0, 10) });
+                      return;
+                    }
+                    actions.updateProject(project.id, { status: newStatus });
+                  }}
+                >
+                  <option value="on-track">On track</option>
+                  <option value="at-risk">At risk</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="done">Completed ✓</option>
+                  <option value="closed">Closed</option>
+                </select>
+                {(state.programs || []).length > 0 && (
+                  <select
+                    className="select proj-status-select"
+                    style={{ padding: '2px 6px', fontSize: 11 }}
+                    value={project.programId || ''}
+                    onChange={(e) => actions.updateProject(project.id, { programId: e.target.value || null })}
+                  >
+                    <option value="">No program</option>
+                    {(state.programs || []).map((pg) => (
+                      <option key={pg.id} value={pg.id}>{pg.name}</option>
+                    ))}
+                  </select>
+                )}
+                {state.projects.filter(p => p.id !== project.id).length > 0 && (
+                  <DependsOnSelect project={project} allProjects={state.projects} />
+                )}
+                <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>Start</span>
+                <input
+                  type="date"
+                  className="input"
+                  style={{ fontSize: 11, padding: '2px 6px', width: 130 }}
+                  value={project.startDate || ''}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (!next || !project.startDate) { actions.updateProject(project.id, { startDate: next }); return; }
+                    const delta = Math.round((new Date(next + 'T00:00:00') - new Date(project.startDate + 'T00:00:00')) / 86400000);
+                    actions.shiftProjectDates(project.id, delta);
+                  }}
+                />
+                <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', flexShrink: 0 }}>→</span>
+                <input
+                  type="date"
+                  className="input"
+                  style={{ fontSize: 11, padding: '2px 6px', width: 130 }}
+                  value={project.dueDate || ''}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    actions.updateProject(project.id, { dueDate: next });
+                  }}
+                />
+              </div>
+              <div className="title-h1" style={{ marginBottom: 6 }}>
+                <InlineEdit
+                  value={project.name}
+                  onSave={(v) => actions.updateProject(project.id, { name: v })}
+                  className="title-h1-edit"
+                  placeholder="Project name"
+                />
+              </div>
+              <div className="title-sub" style={{ maxWidth: 760 }}>
+                <InlineEdit
+                  value={project.objective}
+                  onSave={(v) => actions.updateProject(project.id, { objective: v })}
+                  multiline
+                  className="title-sub-edit"
+                  placeholder="Objective — what outcome does this project deliver?"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="row-flex" style={{ marginBottom: 14, gap: 8 }}>
+                <span className="pcard-code">{project.code}</span>
+                {project.programId && (() => {
+                  const pg = (state.programs || []).find(p => p.id === project.programId);
+                  return pg ? <span className="pill pill-ghost" style={{ fontSize: 10, padding: '1px 7px' }}>{pg.name}</span> : null;
+                })()}
+                <span className={`pill pill-${project.priority === 'critical' ? 'danger' : project.priority === 'high' ? 'warn' : 'ghost'}`} style={{ fontSize: 10, padding: '1px 7px' }}>{project.priority}</span>
+                <span className={`pill pill-${project.status === 'blocked' ? 'danger' : project.status === 'at-risk' ? 'warn' : project.status === 'on-track' ? 'ok' : project.status === 'done' ? 'ok' : 'neutral'}`} style={{ fontSize: 10, padding: '1px 7px' }}>{project.status === 'on-track' ? 'On track' : project.status === 'at-risk' ? 'At risk' : project.status === 'blocked' ? 'Blocked' : project.status === 'done' ? 'Completed' : project.status === 'closed' ? 'Closed' : project.status}</span>
+                {(project.dependsOn || []).length > 0 && (
+                  <span style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>← {(project.dependsOn || []).map(did => { const d = state.projects.find(p => p.id === did); return d ? d.code : '?'; }).join(', ')}</span>
+                )}
+                {(project.startDate || project.dueDate) && (
+                  <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 4 }}>
+                    {project.startDate ? fmtDate(project.startDate) : '?'} → {project.dueDate ? fmtDate(project.dueDate) : '?'}
+                  </span>
+                )}
+              </div>
+              <div className="title-h1" style={{ marginBottom: 6 }}>{project.name}</div>
+              {project.objective && <div className="title-sub" style={{ maxWidth: 760 }}>{project.objective}</div>}
+            </>
+          )}
         </div>
         <div className="stack-sm" style={{ minWidth: 200 }}>
           <div className="row-flex-sb">
@@ -281,22 +309,11 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
               {risk.peak || '—'}
             </span>
           </div>
-          <div style={{ marginTop: 8, textAlign: 'right' }}>
-            <button className="btn btn-sm" style={{ color: 'var(--danger)', borderColor: 'color-mix(in oklch, var(--danger) 40%, transparent)' }}
-              onClick={() => {
-                if (window.confirm(`Delete "${project.name}" and all its tasks, milestones, notes, and risks?`)) {
-                  actions.deleteProject(project.id);
-                  actions.setMeta({ activeView: 'portfolio' });
-                }
-              }}>
-              Delete project
-            </button>
-          </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="tabs">
+      <div className="tabs" style={{ display: 'flex', alignItems: 'center' }}>
         {projectTabOrder.map((tabId) => {
           const t = TAB_DEFS.find((x) => x.id === tabId);
           if (!t) return null;
@@ -316,38 +333,28 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
             </button>
           );
         })}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button className="icon-btn" title={editingHeader ? 'Done editing' : 'Edit project'} onClick={() => setEditingHeader(e => !e)}>
+            <Icon name={editingHeader ? 'check' : 'edit'} size={13} />
+          </button>
+          <button className="icon-btn" title="Delete project" style={{ color: 'var(--danger)' }}
+            onClick={() => {
+              if (window.confirm(`Delete "${project.name}" and all its tasks, milestones, notes, and risks?`)) {
+                actions.deleteProject(project.id);
+                actions.setMeta({ activeView: 'portfolio' });
+              }
+            }}>
+            <Icon name="trash" size={13} />
+          </button>
+        </div>
       </div>
 
       {tab === 'overview' && <OverviewTab project={project} state={state} milestones={milestones} tasks={tasks} onGoto={setTab} />}
-      {tab === 'tasks' && (
-        <div className="card">
-          <div className="card-head">
-            <span className="card-head-title">Tasks · drag to reorder within priority</span>
-            <button className="btn btn-sm btn-primary" onClick={() => setAddingTask(true)}><Icon name="plus" size={11} /> New task</button>
-          </div>
-          {addingTask && <TaskModal taskId={null} state={state} defaults={{ projectId: project.id }} onClose={() => setAddingTask(false)} />}
-          {tasks.length === 0 && !addingTask ? (
-            <EmptyState title="No tasks yet" body="Add the first task to start executing." icon="plus" />
-          ) : (
-            <TaskGroupedList
-              tasks={tasks}
-              projects={[project]}
-              onOpen={onOpenTask}
-              onJumpTo={(id) => setReadOnlyTaskId(id)}
-              onToggle={actions.toggleTaskDone}
-              onReorder={(priority, ids) => actions.reorderTasks(project.id, priority, ids)}
-            />
-          )}
-          {readOnlyTaskId && (
-            <TaskReadOnlyModal taskId={readOnlyTaskId} state={state}
-              onClose={() => setReadOnlyTaskId(null)}
-              onEdit={(id) => { setReadOnlyTaskId(null); onOpenTask(id); }}
-              onJumpTo={(id) => setReadOnlyTaskId(id)} />
-          )}
-        </div>
-      )}
+      {tab === 'tasks' && <ProjectTasksTab project={project} tasks={tasks} state={state} onOpenTask={onOpenTask} />}
       {tab === 'milestones' && <MilestonesTab project={project} milestones={milestones} />}
-      {tab === 'notes' && <NotesTab project={project} notes={notes} />}
+      {tab === 'notes' && <NotesTab project={project} notes={projNotes} defaultKind="note" />}
+      {tab === 'decisions' && <ProjectDecisionsTab project={project} decisions={projDecisions} state={state} />}
+      {tab === 'questions' && <ProjectQuestionsTab project={project} questions={projQuestions} state={state} />}
       {tab === 'artifacts' && <ArtifactsTab project={project} artifacts={artifacts} state={state} />}
       {tab === 'risks' && <RisksTab project={project} risks={risks} state={state} />}
       {tab === 'meetings' && <MeetingsTab project={project} meetings={meetings} state={state} />}
@@ -596,7 +603,7 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
             { label: 'On time', count: onTimeTasks.length, ms: 0, tone: 'var(--fg-3)' },
             { label: 'Late', count: lateTasks.length, ms: lateMs.length, tone: 'var(--danger)' },
           ].map(({ label, count, ms, tone }) => (
-            <div key={label} style={{ background: 'var(--bg-1)', padding: '10px 14px' }}>
+            <div key={label} className="timing-cell" style={{ padding: '10px 14px' }}>
               <div className="mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 4 }}>{label}</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: tone }}>{count}<span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 4 }}>tasks</span></div>
               {ms > 0 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>{ms} milestone{ms > 1 ? 's' : ''}</div>}
@@ -875,42 +882,72 @@ function MilestoneRow({ milestone: m }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState({ name: m.name, description: m.description || '', date: m.date, deliverable: m.deliverable || '' });
 
-  if (editing) {
-    return (
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-        <div className="row-2" style={{ marginBottom: 8 }}>
-          <input className="input" placeholder="Milestone name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus />
-          <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
-        </div>
-        <input className="input" placeholder="Description (what must be true at this point)" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ marginBottom: 8 }} />
-        <input className="input" placeholder="Deliverable (artifact or shipped capability that proves completion)" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} style={{ marginBottom: 8 }} />
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn btn-danger-ghost btn-sm" onClick={() => { if (confirm('Delete milestone?')) actions.deleteMilestone(m.id); }}>Delete</button>
-          <button className="btn btn-sm" onClick={() => setEditing(false)}>Cancel</button>
-          <button className="btn btn-primary btn-sm" onClick={() => { actions.updateMilestone(m.id, draft); setEditing(false); }}>Save</button>
-        </div>
-      </div>
-    );
-  }
   return (
-    <div className="ms-row ms-row-hoverable" onClick={() => setEditing(true)}>
-      <span className={`ms-row-bullet tl-ms-${m.status}`} />
-      <div>
-        <div style={{ fontWeight: 500 }}>{m.name}</div>
-        {m.description && <div style={{ color: 'var(--fg-3)', fontSize: 11.5, marginTop: 1 }}>{m.description}</div>}
-        {m.deliverable && <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, marginTop: 2 }}>→ {m.deliverable}</div>}
+    <>
+      <div className="ms-row ms-row-hoverable" onClick={() => setEditing(true)}>
+        <span className={`ms-row-bullet tl-ms-${m.status}`} />
+        <div>
+          <div style={{ fontWeight: 500 }}>{m.name}</div>
+          {m.description && <div style={{ color: 'var(--fg-3)', fontSize: 11.5, marginTop: 1 }}>{m.description}</div>}
+          {m.deliverable && <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, marginTop: m.description ? 6 : 2 }}>→ {m.deliverable}</div>}
+        </div>
+        {m.status === 'done' && m.completedDate ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+            <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>due {fmtDate(m.date)}</span>
+            <span className="mono" style={{ fontSize: 10.5, color: 'var(--ok)' }}>done {fmtDate(m.completedDate)}</span>
+          </div>
+        ) : (
+          <DueChip date={m.date} done={m.status === 'done'} />
+        )}
+        <select className="select" style={{ padding: '3px 6px', fontSize: 11 }} value={m.status}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => actions.updateMilestone(m.id, { status: e.target.value })}>
+          <option value="planned">Planned</option>
+          <option value="in-progress">In progress</option>
+          <option value="blocked">Blocked</option>
+          <option value="done">Done</option>
+        </select>
+        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setEditing(true); }}><Icon name="edit" size={12} /></button>
       </div>
-      <DueChip date={m.date} />
-      <select className="select" style={{ padding: '3px 6px', fontSize: 11 }} value={m.status}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => actions.updateMilestone(m.id, { status: e.target.value })}>
-        <option value="planned">Planned</option>
-        <option value="in-progress">In progress</option>
-        <option value="blocked">Blocked</option>
-        <option value="done">Done</option>
-      </select>
-      <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setEditing(true); }}><Icon name="edit" size={12} /></button>
-    </div>
+      {editing && (
+        <Modal open title="Edit milestone" onClose={() => setEditing(false)}>
+          <div className="field">
+            <span className="field-label">Name</span>
+            <input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus />
+          </div>
+          <div className="row-2">
+            <div className="field" style={{ marginBottom: 0 }}>
+              <span className="field-label">Target date</span>
+              <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <span className="field-label">Status</span>
+              <select className="select" value={m.status} onChange={(e) => actions.updateMilestone(m.id, { status: e.target.value })}>
+                <option value="planned">Planned</option>
+                <option value="in-progress">In progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Done</option>
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <span className="field-label">Description</span>
+            <textarea className="textarea" rows={2} placeholder="What must be true at this point?" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          </div>
+          <div className="field">
+            <span className="field-label">Deliverable</span>
+            <input className="input" placeholder="Artifact that proves completion" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} />
+          </div>
+          <div className="modal-foot">
+            <button className="btn btn-danger btn-sm" onClick={() => { if (confirm('Delete milestone?')) { actions.deleteMilestone(m.id); setEditing(false); } }}>
+              <Icon name="trash" size={11} /> Delete
+            </button>
+            <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => { actions.updateMilestone(m.id, draft); setEditing(false); }}>Save</button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 
@@ -919,35 +956,46 @@ function MilestonesTab({ project, milestones }) {
   const [draft, setDraft] = React.useState({ name: '', description: '', date: '', deliverable: '' });
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <span className="card-head-title">Milestones</span>
-        <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New</button>
-      </div>
-      <MilestoneTimeline project={project} milestones={milestones} />
+    <>
       {adding && (
-        <div style={{ padding: 12, borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-          <div className="row-2" style={{ marginBottom: 8 }}>
+        <Modal open title="New milestone" onClose={() => setAdding(false)}>
+          <div className="field">
+            <span className="field-label">Name</span>
             <input className="input" placeholder="Milestone name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus />
+          </div>
+          <div className="field">
+            <span className="field-label">Target date</span>
             <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
           </div>
-          <input className="input" placeholder="Description (what must be true at this point)" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ marginBottom: 8 }} />
-          <input className="input" placeholder="Deliverable (artifact that proves completion)" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} />
+          <div className="field">
+            <span className="field-label">Description</span>
+            <textarea className="textarea" rows={2} placeholder="What must be true at this point?" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          </div>
+          <div className="field">
+            <span className="field-label">Deliverable</span>
+            <input className="input" placeholder="Artifact that proves completion" value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} />
+          </div>
           <div className="modal-foot">
             <button className="btn" onClick={() => setAdding(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={() => {
-              if (!draft.name || !draft.date) return;
+            <button className="btn btn-primary" disabled={!draft.name || !draft.date} onClick={() => {
               actions.addMilestone({ ...draft, projectId: project.id });
               setDraft({ name: '', description: '', date: '', deliverable: '' });
               setAdding(false);
-            }}>Add</button>
+            }}>Add milestone</button>
           </div>
-        </div>
+        </Modal>
       )}
-      <div>
-        {milestones.map((m) => <MilestoneRow key={m.id} milestone={m} />)}
+      <MilestoneTimeline project={project} milestones={milestones} />
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Milestones</span>
+          <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New milestone</button>
+        </div>
+        {milestones.length === 0 ? (
+          <EmptyState title="No milestones yet" icon="flag" />
+        ) : milestones.map((m) => <MilestoneRow key={m.id} milestone={m} />)}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1172,65 +1220,25 @@ function NoteRow({ note }) {
   );
 }
 
-function NotesTab({ project, notes }) {
-  const [kind, setKind] = React.useState('all');
+function NotesTab({ project, notes, defaultKind }) {
   const [adding, setAdding] = React.useState(false);
-  const emptyDraft = { kind: 'note', title: '', body: '', context: '', options: '', reversibility: 'reversible', tags: '' };
+  const emptyDraft = { kind: defaultKind || 'note', title: '', body: '', context: '', options: '', reversibility: 'reversible', tags: '' };
   const [draft, setDraft] = React.useState(emptyDraft);
 
-  const filtered = kind === 'all' ? notes : notes.filter((n) => n.kind === kind);
+  const kindLabel = defaultKind === 'decision' ? 'decision' : defaultKind === 'question' ? 'question' : 'note';
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <div className="seg" style={{ width: 'auto' }}>
-          {['all', 'note', 'decision', 'question'].map((k) => (
-            <button key={k} className={`seg-btn ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>
-              {k} {k !== 'all' && <span style={{ color: 'var(--fg-4)', marginLeft: 4 }}>{notes.filter((n) => n.kind === k).length}</span>}
-            </button>
-          ))}
-        </div>
-        <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New note</button>
-      </div>
+    <>
       {adding && (
-        <div style={{ padding: 14, borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-          <div className="field">
-            <span className="field-label">Kind</span>
-            <div className="seg">
-              {['note', 'decision', 'question'].map((k) => (
-                <button key={k} className={`seg-btn ${draft.kind === k ? 'active' : ''}`} onClick={() => setDraft({ ...draft, kind: k })}>{k}</button>
-              ))}
-            </div>
-          </div>
+        <div className="card" style={{ padding: 14, marginBottom: 10 }}>
           <div className="field">
             <span className="field-label">Title</span>
             <input className="input" value={draft.title} autoFocus onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
           </div>
-          {draft.kind === 'decision' && (
-            <div className="field">
-              <span className="field-label">Reversibility</span>
-              <select className="select" value={draft.reversibility} onChange={(e) => setDraft({ ...draft, reversibility: e.target.value })}>
-                <option value="reversible">Reversible</option>
-                <option value="irreversible">Irreversible</option>
-              </select>
-            </div>
-          )}
           <div className="field">
-            <span className="field-label">{draft.kind === 'decision' ? 'Choice / summary' : 'Body'}</span>
+            <span className="field-label">Body</span>
             <textarea className="textarea" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
           </div>
-          {draft.kind === 'decision' && (
-            <>
-              <div className="field">
-                <span className="field-label">Context — what made this necessary</span>
-                <textarea className="input" rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="What situation forced the decision?" />
-              </div>
-              <div className="field">
-                <span className="field-label">Options considered</span>
-                <textarea className="input" rows={2} value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="A) … B) … C) …" />
-              </div>
-            </>
-          )}
           <div className="field">
             <span className="field-label">Tags (comma-separated)</span>
             <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
@@ -1250,10 +1258,16 @@ function NotesTab({ project, notes }) {
           </div>
         </div>
       )}
-      {filtered.length === 0 ? (
-        <EmptyState title="No notes" body="Capture general notes, decisions, and open questions here." icon="note" />
-      ) : filtered.map((n) => <NoteRow key={n.id} note={n} />)}
-    </div>
+      <div className="card">
+        <div className="card-head">
+          <span className="card-head-title">Notes</span>
+          <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={11} /> New {kindLabel}</button>
+        </div>
+        {notes.length === 0 ? (
+          <EmptyState title={`No ${kindLabel}s`} body={`Add ${kindLabel}s for this project.`} icon="note" />
+        ) : notes.map((n) => <NoteRow key={n.id} note={n} />)}
+      </div>
+    </>
   );
 }
 
@@ -1264,24 +1278,14 @@ function RisksTab({ project, risks, state }) {
   const [showModal,       setShowModal]       = React.useState(false);
   const [showFieldsPanel, setShowFieldsPanel] = React.useState(false);
   const [showGuide,       setShowGuide]       = React.useState(false);
-  const fieldsPanelRef = React.useRef(null);
 
   const RR  = window.RiskRow;
   const RM  = window.RiskModal;
   const RGM = window.RiskGuideModal;
   const modalState = state || { projects: [project], risks, tasks: [], notes: [], meetings: [], blockers: [] };
 
-  const enabledFields = state?.meta?.riskFields || window.RISK_FIELDS_DEFAULT || ['category', 'response'];
-
-  React.useEffect(() => {
-    if (!showFieldsPanel) return;
-    const handler = (e) => {
-      if (fieldsPanelRef.current && !fieldsPanelRef.current.contains(e.target))
-        setShowFieldsPanel(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showFieldsPanel]);
+  const allFieldKeys = (window.RISK_FIELDS_ALL || []).map(f => f.key);
+  const enabledFields = state?.meta?.riskFields || allFieldKeys;
 
   const toggleField = (key) => {
     const next = enabledFields.includes(key)
@@ -1418,34 +1422,13 @@ function RisksTab({ project, risks, state }) {
             <button className="btn btn-sm" onClick={() => setShowGuide(true)}>
               <Icon name="circle" size={11} /> Guide
             </button>
-            <div style={{ position: 'relative' }} ref={fieldsPanelRef}>
+            <div>
               <button
                 className={`btn btn-sm${showFieldsPanel ? ' btn-primary' : ''}`}
                 onClick={() => setShowFieldsPanel((v) => !v)}
               >
                 <Icon name="settings" size={11} /> Fields{enabledFields.length > 0 ? ` · ${enabledFields.length}` : ''}
               </button>
-              {showFieldsPanel && (
-                <div style={{
-                  position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 200,
-                  background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8,
-                  padding: '12px 14px', minWidth: 260, boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
-                }}>
-                  <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 10 }}>
-                    Optional fields — affects all views
-                  </div>
-                  {(window.RISK_FIELDS_ALL || []).map((f) => (
-                    <label key={f.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={enabledFields.includes(f.key)}
-                        onChange={() => toggleField(f.key)} style={{ marginTop: 2, flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-1)', lineHeight: 1.3 }}>{f.label}</div>
-                        <div style={{ fontSize: 10.5, color: 'var(--fg-4)', lineHeight: 1.4 }}>{f.hint}</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              )}
             </div>
             <button className="btn btn-sm btn-primary" onClick={() => openModal(null)}>
               <Icon name="plus" size={11} /> New risk
@@ -1482,6 +1465,25 @@ function RisksTab({ project, risks, state }) {
           onClose={() => { setShowModal(false); setModalId(null); }} />
       )}
       {showGuide && RGM && <RGM onClose={() => setShowGuide(false)} />}
+      {showFieldsPanel && (
+        <Modal open title="Risk fields" onClose={() => setShowFieldsPanel(false)}>
+          <div style={{ padding: '8px 0' }}>
+            <div className="mono" style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-4)', marginBottom: 12 }}>
+              Optional fields — affects all views
+            </div>
+            {(window.RISK_FIELDS_ALL || []).map((f) => (
+              <label key={f.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10, cursor: 'pointer' }}>
+                <input type="checkbox" checked={enabledFields.includes(f.key)}
+                  onChange={() => toggleField(f.key)} style={{ marginTop: 2, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-1)', lineHeight: 1.3 }}>{f.label}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--fg-4)', lineHeight: 1.4 }}>{f.hint}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
@@ -1708,12 +1710,15 @@ function MeetingsTab({ project, meetings, state }) {
   const [editModalId, setEditModalId] = React.useState(null);
   const [detailModalId, setDetailModalId] = React.useState(null);
   const [addingModal, setAddingModal] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState({ past: false });
 
   const MR = window.MeetingRow;
   const MFM = window.MtgFormModal;
   const MDM = window.MtgDetailModal;
   const projects = state ? state.projects : (project ? [project] : []);
   const modalState = state || { meetings, projects, tasks: [], notes: [], blockers: [] };
+
+  const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const sorted = [...meetings].sort((a, b) => a.date.localeCompare(b.date));
@@ -1730,28 +1735,35 @@ function MeetingsTab({ project, meetings, state }) {
   ) : null;
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <span className="card-head-title">Meeting notes</span>
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <button className="btn btn-sm btn-primary" onClick={() => setAddingModal(true)}><Icon name="plus" size={11} /> New meeting</button>
       </div>
       {meetings.length === 0
-        ? <EmptyState title="No meetings yet" body="Log meeting notes, attendees, and action items here." icon="clock" />
+        ? <div className="card"><EmptyState title="No meetings yet" body="Log meeting notes, attendees, and action items here." icon="clock" /></div>
         : (
-          <>
+          <div className="card">
             {upcoming.length > 0 && (
-              <>
-                <div className="tgroup-head"><span style={{ color: 'var(--mtg, var(--info))' }}>Upcoming</span><span className="tgroup-head-count">{upcoming.length}</span></div>
-                {upcoming.map(renderRow)}
-              </>
+              <div>
+                <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('upcoming')}>
+                  <Icon name={collapsed['upcoming'] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                  <span style={{ color: 'var(--mtg, var(--info))' }}>Upcoming</span>
+                  <span className="tgroup-head-count">{upcoming.length}</span>
+                </div>
+                {!collapsed['upcoming'] && upcoming.map(renderRow)}
+              </div>
             )}
             {past.length > 0 && (
-              <>
-                <div className="tgroup-head"><span style={{ color: 'var(--fg-3)' }}>Past</span><span className="tgroup-head-count">{past.length}</span></div>
-                {past.map(renderRow)}
-              </>
+              <div>
+                <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection('past')}>
+                  <Icon name={collapsed['past'] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                  <span style={{ color: 'var(--fg-3)' }}>Past</span>
+                  <span className="tgroup-head-count">{past.length}</span>
+                </div>
+                {!collapsed['past'] && past.map(renderRow)}
+              </div>
             )}
-          </>
+          </div>
         )
       }
       {addingModal && MFM && (
@@ -1769,7 +1781,257 @@ function MeetingsTab({ project, meetings, state }) {
           onOpenTask={(id) => window.actions && window.actions.openTask(id)}
           onClose={() => setDetailModalId(null)} />
       )}
-    </div>
+    </>
+  );
+}
+
+function ProjectTasksTab({ project, tasks, state, onOpenTask }) {
+  const [collapsed, setCollapsed] = React.useState({});
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [addingTask, setAddingTask] = React.useState(false);
+  const [readOnlyTaskId, setReadOnlyTaskId] = React.useState(null);
+  const [dragOverId, setDragOverId] = React.useState(null);
+  const dragSrcId = React.useRef(null);
+
+  const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
+
+  const orderFromMeta = state.meta.tasksViewOrder || [];
+  const sortByOrder = (arr) =>
+    [...arr].sort((a, b) => {
+      const ai = orderFromMeta.indexOf(a.id);
+      const bi = orderFromMeta.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+
+  const reorderInSection = (sectionTasks, dropTargetId) => {
+    const srcId = dragSrcId.current;
+    if (!srcId || srcId === dropTargetId) return;
+    const ids = sectionTasks.map((t) => t.id);
+    const from = ids.indexOf(srcId);
+    const to = ids.indexOf(dropTargetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(from, 1);
+    ids.splice(to, 0, srcId);
+    const otherIds = (state.meta.tasksViewOrder || []).filter((id) => !ids.includes(id));
+    actions.setMeta({ tasksViewOrder: [...ids, ...otherIds] });
+  };
+
+  const makeDragProps = (t, sectionTasks) => ({
+    onDragStart: (e) => { dragSrcId.current = t.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); },
+    onDragOver: (e) => { e.preventDefault(); setDragOverId(t.id); },
+    onDrop: (e) => { e.preventDefault(); reorderInSection(sectionTasks, t.id); setDragOverId(null); },
+    onDragEnd: () => { dragSrcId.current = null; setDragOverId(null); },
+  });
+
+  const sections = ['critical', 'high', 'medium', 'low'].map((p) => ({
+    key: p,
+    label: p.charAt(0).toUpperCase() + p.slice(1),
+    labelColor: { critical: 'var(--danger)', high: 'var(--warn)', medium: 'var(--fg-2)', low: 'var(--fg-4)' }[p],
+    tasks: sortByOrder(
+      tasks.filter((t) => t.priority === p && t.status !== 'done' && t.status !== 'cancelled')
+        .sort((a, b) => (a.dueDate ? daysFromToday(a.dueDate) : 999) - (b.dueDate ? daysFromToday(b.dueDate) : 999))
+    ),
+  })).filter((s) => s.tasks.length > 0);
+
+  const doneTasks = sortByOrder(tasks.filter((t) => t.status === 'done'));
+  if (doneTasks.length > 0) sections.push({ key: 'done', label: 'Done', labelColor: 'var(--ok)', tasks: doneTasks, defaultCollapsed: true });
+  const cancelledTasks = sortByOrder(tasks.filter((t) => t.status === 'cancelled'));
+  if (cancelledTasks.length > 0) sections.push({ key: 'cancelled', label: 'Cancelled', labelColor: 'var(--fg-4)', tasks: cancelledTasks, defaultCollapsed: true });
+
+  React.useEffect(() => {
+    const init = {};
+    sections.forEach((s) => { if (s.defaultCollapsed && collapsed[s.key] === undefined) init[s.key] = true; });
+    if (Object.keys(init).length) setCollapsed((prev) => ({ ...prev, ...init }));
+  }, []);
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <button className="btn btn-sm btn-primary" onClick={() => setAddingTask(true)}><Icon name="plus" size={11} /> New task</button>
+      </div>
+      {addingTask && <TaskModal taskId={null} state={state} defaults={{ projectId: project.id }} onClose={() => setAddingTask(false)} />}
+      {tasks.length === 0 && !addingTask ? (
+        <div className="card"><EmptyState title="No tasks yet" body="Add the first task to start executing." icon="plus" /></div>
+      ) : (
+        <div className="card">
+          {sections.map((section) => (
+            <div key={section.key}>
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection(section.key)}>
+                <Icon name={collapsed[section.key] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span style={{ color: section.labelColor }}>{section.label}</span>
+                <span className="tgroup-head-count">{section.tasks.length}</span>
+              </div>
+              {!collapsed[section.key] && section.tasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  project={project}
+                  onOpen={(id) => onOpenTask(id)}
+                  onToggle={actions.toggleTaskDone}
+                  expanded={expandedId === t.id}
+                  onToggleExpand={() => toggleExpand(t.id)}
+                  onJumpTo={(id) => setReadOnlyTaskId(id)}
+                  dragProps={makeDragProps(t, section.tasks)}
+                  dropState={dragOverId === t.id ? 'drop-before' : dragSrcId.current === t.id ? 'dragging' : ''}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {readOnlyTaskId && (
+        <TaskReadOnlyModal taskId={readOnlyTaskId} state={state}
+          onClose={() => setReadOnlyTaskId(null)}
+          onEdit={(id) => { setReadOnlyTaskId(null); onOpenTask(id); }}
+          onJumpTo={(id) => setReadOnlyTaskId(id)} />
+      )}
+    </>
+  );
+}
+
+function ProjectDecisionsTab({ project, decisions, state }) {
+  const DR = window.DecisionRow;
+  const DM = window.DecisionModal;
+  const [collapsed, setCollapsed] = React.useState({ cancelled: true });
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [modalId, setModalId] = React.useState(null);
+  const [showModal, setShowModal] = React.useState(false);
+
+  const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const getQuarter = (dateStr) => {
+    const d = new Date((dateStr || todayIso) + 'T00:00:00');
+    return `${d.getFullYear()} Q${Math.floor(d.getMonth() / 3) + 1}`;
+  };
+
+  const sorted = [...decisions].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const pinned = sorted.filter((n) => n.pinned && !n.cancelled);
+  const byQ = {};
+  sorted.filter((n) => !n.pinned && !n.cancelled).forEach((n) => {
+    const q = getQuarter(n.date || todayIso);
+    (byQ[q] = byQ[q] || []).push(n);
+  });
+  const sections = [];
+  if (pinned.length > 0) sections.push({ key: 'pinned', label: 'Pinned', labelColor: 'var(--warn)', items: pinned });
+  Object.keys(byQ).sort((a, b) => b.localeCompare(a)).forEach((q) => {
+    sections.push({ key: q, label: q, labelColor: 'var(--fg-3)', items: byQ[q] });
+  });
+  const cancelled = sorted.filter((n) => n.cancelled);
+  if (cancelled.length > 0) sections.push({ key: 'cancelled', label: 'Cancelled', labelColor: 'var(--fg-4)', items: cancelled });
+
+  const openModal = (id) => { setModalId(id || null); setShowModal(true); };
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <button className="btn btn-sm btn-primary" onClick={() => openModal(null)}><Icon name="plus" size={11} /> Log decision</button>
+      </div>
+      {sections.length === 0 ? (
+        <div className="card"><EmptyState title="No decisions" body="Log decisions for this project." icon="note" /></div>
+      ) : DR && (
+        <div className="card">
+          {sections.map((section) => (
+            <div key={section.key}>
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection(section.key)}>
+                <Icon name={collapsed[section.key] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span style={{ color: section.labelColor }}>{section.label}</span>
+                <span className="tgroup-head-count">{section.items.length}</span>
+              </div>
+              {!collapsed[section.key] && section.items.map((n) => (
+                <DR
+                  key={n.id}
+                  note={n}
+                  project={project}
+                  expanded={expandedId === n.id}
+                  onToggleExpand={() => toggleExpand(n.id)}
+                  onEdit={() => openModal(n.id)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {showModal && DM && (
+        <DM noteId={modalId} state={state}
+          defaults={{ projectId: project.id }}
+          onClose={() => { setShowModal(false); setModalId(null); }} />
+      )}
+    </>
+  );
+}
+
+function ProjectQuestionsTab({ project, questions, state }) {
+  const QR = window.QuestionRow;
+  const QM = window.QuestionModal;
+  const RQM = window.ResolveQuestionModal;
+  const [collapsed, setCollapsed] = React.useState({ resolved: true, cancelled: true });
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [modalId, setModalId] = React.useState(null);
+  const [showModal, setShowModal] = React.useState(false);
+  const [resolveId, setResolveId] = React.useState(null);
+
+  const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggleExpand = (id) => setExpandedId((prev) => (prev === id ? null : id));
+
+  const sorted = [...questions].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const open = sorted.filter((n) => !n.resolved && !n.cancelled);
+  const resolved = sorted.filter((n) => n.resolved && !n.cancelled);
+  const cancelled = sorted.filter((n) => n.cancelled);
+
+  const openModal = (id) => { setModalId(id || null); setShowModal(true); };
+
+  const sectionDefs = [
+    open.length > 0 && { key: 'open', label: 'Open', labelColor: 'var(--warn)', items: open },
+    resolved.length > 0 && { key: 'resolved', label: 'Resolved', labelColor: 'var(--ok)', items: resolved },
+    cancelled.length > 0 && { key: 'cancelled', label: 'Cancelled', labelColor: 'var(--fg-4)', items: cancelled },
+  ].filter(Boolean);
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <button className="btn btn-sm btn-primary" onClick={() => openModal(null)}><Icon name="plus" size={11} /> New question</button>
+      </div>
+      {sectionDefs.length === 0 ? (
+        <div className="card"><EmptyState title="No questions" body="Log questions for this project." icon="search" /></div>
+      ) : QR && (
+        <div className="card">
+          {sectionDefs.map((section) => (
+            <div key={section.key}>
+              <div className="tgroup-head tgroup-head-toggle" onClick={() => toggleSection(section.key)}>
+                <Icon name={collapsed[section.key] ? 'chevronR' : 'chevronD'} size={10} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
+                <span style={{ color: section.labelColor }}>{section.label}</span>
+                <span className="tgroup-head-count">{section.items.length}</span>
+              </div>
+              {!collapsed[section.key] && section.items.map((n) => (
+                <QR
+                  key={n.id}
+                  note={n}
+                  projects={[project]}
+                  expanded={expandedId === n.id}
+                  onToggleExpand={() => toggleExpand(n.id)}
+                  onEdit={() => openModal(n.id)}
+                  onResolve={() => setResolveId(n.id)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {showModal && QM && (
+        <QM noteId={modalId} state={state}
+          defaults={{ projectId: project.id }}
+          onClose={() => { setShowModal(false); setModalId(null); }} />
+      )}
+      {resolveId && RQM && (
+        <RQM noteId={resolveId} state={state} onClose={() => setResolveId(null)} />
+      )}
+    </>
   );
 }
 

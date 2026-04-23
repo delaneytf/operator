@@ -244,7 +244,7 @@ function TaskReadOnlyModal({ taskId, state, onClose, onEdit, onJumpTo }) {
 function Today({ state, onOpenTask, onOpenProject }) {
   const [showAdd, setShowAdd] = useStateT2(false);
   const [endDayModal, setEndDayModal] = useStateT2(false);
-  const [collapsed, setCollapsed] = useStateT2({ overdue: false, today: false, soon: false, remaining: true });
+  const [collapsed, setCollapsed] = useStateT2({ overdue: true, today: true, soon: true, remaining: true, waiting: false });
   const toggleSection = (key) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   const [expandedTaskId, setExpandedTaskId] = useStateT2(null);
   const [readOnlyTaskId, setReadOnlyTaskId] = useStateT2(null);
@@ -330,7 +330,7 @@ function Today({ state, onOpenTask, onOpenProject }) {
       {/* Today's reminders */}
       {todayReminders.length > 0 && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'oklch(70% 0.18 300 / 0.45)', background: 'oklch(70% 0.18 300 / 0.06)' }}>
-          <div className="card-head">
+          <div className="card-head" style={{ background: 'oklch(70% 0.18 300 / 0.12)' }}>
             <div className="row-flex" style={{ gap: 8 }}>
               <Icon name="bell" size={13} style={{ color: 'oklch(45% 0.18 300)' }} />
               <span className="card-head-title" style={{ color: 'oklch(45% 0.18 300)' }}>
@@ -584,10 +584,14 @@ function Today({ state, onOpenTask, onOpenProject }) {
         <>
           <div className="section-gap" />
           <div className="card">
-            <div className="card-head">
-              <span className="card-head-title">Waiting on others</span>
+            <div className="card-head" style={{ cursor: 'pointer' }} onClick={() => toggleSection('waiting')}>
+              <div className="row-flex" style={{ gap: 8 }}>
+                <Icon name={collapsed.waiting ? 'chevronR' : 'chevronD'} size={10} />
+                <span className="card-head-title">Waiting on others</span>
+              </div>
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{state.blockers.length}</span>
             </div>
+            {!collapsed.waiting && (
             <div>
               {state.blockers.map((b) => {
                 const task = state.tasks.find((t) => t.id === b.taskId);
@@ -610,6 +614,7 @@ function Today({ state, onOpenTask, onOpenProject }) {
                 );
               })}
             </div>
+            )}
           </div>
         </>
       )}
