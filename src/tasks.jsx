@@ -497,6 +497,13 @@ function TaskModal({ taskId, state, onClose, defaults = {} }) {
         </select>
       </div>
       <div className="field">
+        <span className="field-label">Milestone</span>
+        <select className="select" value={local.milestoneId || ''} onChange={(e) => save({ milestoneId: e.target.value || null })}>
+          <option value="">— none —</option>
+          {(state.milestones || []).filter(ms => ms.projectId === local.projectId).map((ms) => <option key={ms.id} value={ms.id}>{ms.name}{ms.date ? ` (${ms.date})` : ''}</option>)}
+        </select>
+      </div>
+      <div className="field">
         <span className="field-label">Description <span style={{ color: 'var(--fg-4)', fontWeight: 400 }}>(optional)</span></span>
         <textarea
           className="textarea"

@@ -1,0 +1,116 @@
+### OPERATOR IMPORT TEMPLATE ###
+### Fill out the sections below and upload to your AI assistant with instructions to populate Operator.
+### Use | (pipe) to separate multiple values in array fields (e.g., team members, tags, project IDs).
+### All dates should be YYYY-MM-DD format.
+### Leave fields blank if not applicable. Do not delete column headers.
+### IDs are for cross-referencing within this file only — Operator will generate real IDs on import.
+
+═══════════════════════════════════════════════════════════════════════════
+PROGRAMS
+═══════════════════════════════════════════════════════════════════════════
+ref_id,name,description,deliverable
+pg-1,,,
+
+═══════════════════════════════════════════════════════════════════════════
+PROJECTS
+═══════════════════════════════════════════════════════════════════════════
+### program_ref → matches a ref_id from PROGRAMS above
+### status: on-track | at-risk | blocked | done
+### priority: critical | high | medium | low
+### color: amber | rose | sky | violet | emerald
+### team: pipe-separated names (e.g., Alice|Bob|Carol)
+### depends_on: pipe-separated project ref_ids
+ref_id,program_ref,code,name,objective,description,deliverable,status,priority,color,owner,team,start_date,due_date,depends_on
+
+p-1,pg-1,PROJ,Project Name,High-level goal,,Expected output,on-track,medium,amber,You,,2026-01-01,2026-06-30,
+
+═══════════════════════════════════════════════════════════════════════════
+SUCCESS CRITERIA (nested under projects)
+═══════════════════════════════════════════════════════════════════════════
+### project_ref → matches a ref_id from PROJECTS above
+project_ref,text,current,target
+
+p-1,Metric or criterion description,Current value,Target value
+
+═══════════════════════════════════════════════════════════════════════════
+MILESTONES
+═══════════════════════════════════════════════════════════════════════════
+### project_ref → matches a ref_id from PROJECTS above
+### status: planned | in-progress | blocked | done | cancelled
+ref_id,project_ref,name,description,deliverable,date,status
+
+m-1,p-1,Milestone name,Details,Expected deliverable,2026-03-15,planned
+
+═══════════════════════════════════════════════════════════════════════════
+TASKS
+═══════════════════════════════════════════════════════════════════════════
+### project_ref → matches a ref_id from PROJECTS above
+### status: todo | in-progress | blocked | done | cancelled
+### priority: critical | high | medium | low
+### source: planned | reactive
+### depends_on: pipe-separated task ref_ids
+### estimate: number (days)
+ref_id,project_ref,title,status,priority,due_date,estimate,source,description,depends_on
+
+t-1,p-1,Task title,todo,medium,2026-02-15,2,planned,Task description,
+t-2,p-1,Dependent task,todo,high,2026-03-01,3,planned,,t-1
+
+═══════════════════════════════════════════════════════════════════════════
+BLOCKERS (attached to tasks)
+═══════════════════════════════════════════════════════════════════════════
+### task_ref → matches a ref_id from TASKS above
+### project_ref → matches a ref_id from PROJECTS above
+task_ref,project_ref,reason,since
+
+t-1,p-1,Waiting on external vendor,2026-02-01
+
+═══════════════════════════════════════════════════════════════════════════
+RISKS
+═══════════════════════════════════════════════════════════════════════════
+### project_ref → matches a ref_id from PROJECTS above
+### severity: 1 (negligible) to 5 (catastrophic)
+### likelihood: 1 (rare) to 5 (almost certain)
+### category: Technical | Financial | Schedule | Resource | External | Compliance
+### response: Reduce | Avoid | Accept | Transfer
+### status: open | monitoring | closed | cancelled
+project_ref,title,description,severity,likelihood,category,response,mitigation,impact,trigger,contingency,status,owner,due_date,review_date
+
+p-1,Risk title,Full description,3,3,Technical,Reduce,Mitigation steps,Impact if occurs,Trigger indicators,Contingency plan,open,You,2026-04-01,2026-03-15
+
+═══════════════════════════════════════════════════════════════════════════
+DECISIONS
+═══════════════════════════════════════════════════════════════════════════
+### project_ref → matches a ref_id from PROJECTS above
+### meeting_ref → optional, matches a ref_id from MEETINGS below
+### reversibility: reversible | irreversible
+### tags: pipe-separated
+project_ref,meeting_ref,title,body,context,options_considered,reversibility,date,tags
+
+p-1,,Decision title,What was decided,What made this necessary,A) Option 1 B) Option 2,reversible,2026-02-01,architecture|backend
+
+═══════════════════════════════════════════════════════════════════════════
+QUESTIONS
+═══════════════════════════════════════════════════════════════════════════
+### project_ref → matches a ref_id from PROJECTS above (pipe-separated for multiple)
+### meeting_ref → optional, matches a ref_id from MEETINGS below
+### resolved: true | false
+### tags: pipe-separated
+project_ref,meeting_ref,title,body,resolution,resolved,date,tags
+
+p-1,,Question to answer,Background context,How it was resolved,false,2026-02-01,vendor|decision-needed
+
+═══════════════════════════════════════════════════════════════════════════
+MEETINGS
+═══════════════════════════════════════════════════════════════════════════
+### project_refs → pipe-separated project ref_ids
+### recurrence: none | weekly | biweekly | monthly | quarterly
+ref_id,title,date,attendees,notes,project_refs,recurrence
+
+mt-1,Meeting title,2026-02-10,Alice|Bob|Carol,Meeting notes here,p-1,weekly
+
+═══════════════════════════════════════════════════════════════════════════
+REMINDERS
+═══════════════════════════════════════════════════════════════════════════
+date,title,note
+
+2026-03-01,Review Q1 progress,Check milestones and risk register

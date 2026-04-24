@@ -1,5 +1,31 @@
 // Project workspace — objective, milestones, tasks, notes, risks.
 
+// Build human-friendly display IDs: PG-1, P-1.1, M-1.1, SC-1.1
+function buildDisplayIds(state) {
+  const map = {};
+  const programs = state.programs || [];
+  programs.forEach((pg, pi) => {
+    map[pg.id] = `PG-${pi + 1}`;
+    const projects = (state.projects || []).filter(p => p.programId === pg.id);
+    projects.forEach((proj, pri) => {
+      map[proj.id] = `P-${pi + 1}.${pri + 1}`;
+      const milestones = (state.milestones || []).filter(m => m.projectId === proj.id);
+      milestones.forEach((m, mi) => { if (m.id) map[m.id] = `M-${pi + 1}.${mi + 1}`; });
+      const sc = proj.successCriteria || [];
+      sc.forEach((s, si) => { if (s.id) map[s.id] = `SC-${pi + 1}.${si + 1}`; });
+    });
+  });
+  // Handle orphan projects (no program)
+  const orphans = (state.projects || []).filter(p => !p.programId);
+  orphans.forEach((proj, pri) => {
+    if (!map[proj.id]) map[proj.id] = `P-0.${pri + 1}`;
+    const milestones = (state.milestones || []).filter(m => m.projectId === proj.id);
+    milestones.forEach((m, mi) => { if (m.id && !map[m.id]) map[m.id] = `M-0.${mi + 1}`; });
+    const sc = proj.successCriteria || [];
+    sc.forEach((s, si) => { if (s.id && !map[s.id]) map[s.id] = `SC-0.${si + 1}`; });
+  });
+  return map;
+}
 function DependsOnSelect({ project, allProjects }) {
   const [open, setOpen] = React.useState(false);
   const deps = project.dependsOn || [];
@@ -133,6 +159,7 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
   const risks = state.risks.filter((r) => r.projectId === projectId);
   const meetings = (state.meetings || []).filter((m) => (m.projectIds || []).includes(projectId)).sort((a, b) => b.date.localeCompare(a.date));
   const prog = projectProgress(state, projectId);
+  const displayIds = buildDisplayIds(state);
   const risk = projectRiskScore(state, projectId);
 
   const TAB_DEFS = [
@@ -208,6 +235,7 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
                     actions.updateProject(project.id, { status: newStatus });
                   }}
                 >
+                  <option value="planned">Planned</option>
                   <option value="on-track">On track</option>
                   <option value="at-risk">At risk</option>
                   <option value="blocked">Blocked</option>
@@ -263,26 +291,18 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
                   placeholder="Project name"
                 />
               </div>
-              <div className="title-sub" style={{ maxWidth: 760 }}>
-                <InlineEdit
-                  value={project.objective}
-                  onSave={(v) => actions.updateProject(project.id, { objective: v })}
-                  multiline
-                  className="title-sub-edit"
-                  placeholder="Objective — what outcome does this project deliver?"
-                />
-              </div>
             </>
           ) : (
             <>
               <div className="row-flex" style={{ marginBottom: 14, gap: 8 }}>
                 <span className="pcard-code">{project.code}</span>
+                <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{displayIds[project.id] || project.id.toUpperCase()}</span>
                 {project.programId && (() => {
                   const pg = (state.programs || []).find(p => p.id === project.programId);
                   return pg ? <span className="pill pill-ghost" style={{ fontSize: 10, padding: '1px 7px' }}>{pg.name}</span> : null;
                 })()}
                 <span className={`pill pill-${project.priority === 'critical' ? 'danger' : project.priority === 'high' ? 'warn' : 'ghost'}`} style={{ fontSize: 10, padding: '1px 7px' }}>{project.priority}</span>
-                <span className={`pill pill-${project.status === 'blocked' ? 'danger' : project.status === 'at-risk' ? 'warn' : project.status === 'on-track' ? 'ok' : project.status === 'done' ? 'ok' : 'neutral'}`} style={{ fontSize: 10, padding: '1px 7px' }}>{project.status === 'on-track' ? 'On track' : project.status === 'at-risk' ? 'At risk' : project.status === 'blocked' ? 'Blocked' : project.status === 'done' ? 'Completed' : project.status === 'closed' ? 'Closed' : project.status}</span>
+                <span className={`pill pill-${project.status === 'blocked' ? 'danger' : project.status === 'at-risk' ? 'warn' : project.status === 'on-track' ? 'ok' : project.status === 'done' ? 'ok' : project.status === 'planned' ? 'info' : 'neutral'}`} style={{ fontSize: 10, padding: '1px 7px' }}>{project.status === 'on-track' ? 'On track' : project.status === 'at-risk' ? 'At risk' : project.status === 'blocked' ? 'Blocked' : project.status === 'done' ? 'Completed' : project.status === 'closed' ? 'Closed' : project.status === 'planned' ? 'Planned' : project.status}</span>
                 {(project.dependsOn || []).length > 0 && (
                   <span style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>← {(project.dependsOn || []).map(did => { const d = state.projects.find(p => p.id === did); return d ? d.code : '?'; }).join(', ')}</span>
                 )}
@@ -293,7 +313,6 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
                 )}
               </div>
               <div className="title-h1" style={{ marginBottom: 6 }}>{project.name}</div>
-              {project.objective && <div className="title-sub" style={{ maxWidth: 760 }}>{project.objective}</div>}
             </>
           )}
         </div>
@@ -313,7 +332,7 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
       </div>
 
       {/* Tabs */}
-      <div className="tabs" style={{ display: 'flex', alignItems: 'center' }}>
+      <div className="tabs" style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
         {projectTabOrder.map((tabId) => {
           const t = TAB_DEFS.find((x) => x.id === tabId);
           if (!t) return null;
@@ -349,9 +368,9 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
         </div>
       </div>
 
-      {tab === 'overview' && <OverviewTab project={project} state={state} milestones={milestones} tasks={tasks} onGoto={setTab} />}
+      {tab === 'overview' && <OverviewTab project={project} state={state} milestones={milestones} tasks={tasks} onGoto={setTab} displayIds={displayIds} />}
       {tab === 'tasks' && <ProjectTasksTab project={project} tasks={tasks} state={state} onOpenTask={onOpenTask} />}
-      {tab === 'milestones' && <MilestonesTab project={project} milestones={milestones} />}
+      {tab === 'milestones' && <MilestonesTab project={project} milestones={milestones} tasks={tasks} displayIds={displayIds} />}
       {tab === 'notes' && <NotesTab project={project} notes={projNotes} defaultKind="note" />}
       {tab === 'decisions' && <ProjectDecisionsTab project={project} decisions={projDecisions} state={state} />}
       {tab === 'questions' && <ProjectQuestionsTab project={project} questions={projQuestions} state={state} />}
@@ -469,7 +488,7 @@ function ProjectView({ state, projectId, onOpenTask, onBack }) {
   );
 }
 
-function OverviewTab({ project, state, milestones, tasks, onGoto }) {
+function OverviewTab({ project, state, milestones, tasks, onGoto, displayIds }) {
   const openTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
   const doneTasks = tasks.filter((t) => t.status === 'done');
   const topTasks = [...openTasks].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || (a.rank || 99) - (b.rank || 99)).slice(0, 5);
@@ -546,7 +565,7 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
   const WIDE_TILES = new Set(['timing', 'meetings', 'notes']);
 
   const tileContent = {
-    'success-criteria': <SuccessCriteriaCard project={project} />,
+    'success-criteria': <SuccessCriteriaCard project={project} displayIds={displayIds} />,
     'milestones': (
       <div className="card">
         <div className="card-head">
@@ -633,6 +652,7 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
           const recLabel = m.recurrence && m.recurrence !== 'none' ? RECURRENCE_LABELS[m.recurrence] : null;
           const linkedTaskCount = (state.tasks || []).filter((t) => t.meetingId === m.id).length;
           const linkedDecCount = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision').length;
+          const linkedQCount = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'question').length;
           return (
             <div key={m.id} className="ms-compact-row" style={{ cursor: 'default' }}>
               <Icon name="clock" size={12} style={{ color: 'var(--mtg)', flexShrink: 0 }} />
@@ -645,10 +665,11 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
                   {recLabel && <span className="pill" style={{ fontSize: 9.5, padding: '1px 5px' }}>↻ {recLabel}</span>}
                   <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>{fmtDate(m.date)}</span>
                 </div>
-                {(linkedTaskCount > 0 || linkedDecCount > 0) && (
+                {(linkedTaskCount > 0 || linkedDecCount > 0 || linkedQCount > 0) && (
                   <div className="row-flex" style={{ gap: 6 }}>
                     {linkedTaskCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedTaskCount} task{linkedTaskCount > 1 ? 's' : ''}</span>}
                     {linkedDecCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedDecCount} decision{linkedDecCount > 1 ? 's' : ''}</span>}
+                    {linkedQCount > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{linkedQCount} question{linkedQCount > 1 ? 's' : ''}</span>}
                   </div>
                 )}
               </div>
@@ -698,50 +719,117 @@ function OverviewTab({ project, state, milestones, tasks, onGoto }) {
   );
 }
 
-function SuccessCriteriaCard({ project }) {
+function SuccessCriteriaCard({ project, displayIds = {} }) {
   const [editingId, setEditingId] = React.useState(null);
   const [draft, setDraft] = React.useState({});
+  const [addMenuOpen, setAddMenuOpen] = React.useState(false);
 
-  const startEdit = (sc) => { setEditingId(sc.id); setDraft({ text: sc.text, current: sc.current, target: sc.target }); };
+  const startEdit = (sc) => { setEditingId(sc.id); setDraft({ text: sc.text, type: sc.type || 'metric', current: sc.current, target: sc.target, final: sc.final || '', finalResult: sc.finalResult || '', done: sc.done || false }); };
   const saveEdit = () => {
     if (draft.text) actions.updateSuccessCriterion(project.id, editingId, draft);
     setEditingId(null);
   };
+  const addCriterion = (type) => {
+    if (type === 'binary') {
+      actions.addSuccessCriterion(project.id, { type: 'binary', text: 'New criterion', done: false });
+    } else {
+      actions.addSuccessCriterion(project.id, { type: 'metric', text: 'New criterion', current: '', target: '', final: '', finalResult: '' });
+    }
+    setAddMenuOpen(false);
+  };
+
+  const criteria = project.successCriteria || [];
 
   return (
     <div className="card">
       <div className="card-head">
         <span className="card-head-title">Objective & success criteria</span>
-        <button className="btn btn-ghost btn-sm" onClick={() => actions.addSuccessCriterion(project.id, { text: 'New criterion', current: '0', target: '100' })}>
-          <Icon name="plus" size={11} /> Add
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setAddMenuOpen(!addMenuOpen)}>
+            <Icon name="plus" size={11} /> Add
+          </button>
+          {addMenuOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setAddMenuOpen(false)} />
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 6, boxShadow: 'var(--shadow)', zIndex: 100, overflow: 'hidden', minWidth: 140 }}>
+                <div className="dropdown-item" style={{ padding: '7px 12px', fontSize: 12, cursor: 'pointer' }}
+                  onClick={() => addCriterion('metric')}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  Metric
+                  <div style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 1 }}>Baseline / Target / Final</div>
+                </div>
+                <div className="dropdown-item" style={{ padding: '7px 12px', fontSize: 12, cursor: 'pointer', borderTop: '1px solid var(--line-2)' }}
+                  onClick={() => addCriterion('binary')}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  Binary
+                  <div style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 1 }}>Done / Not done</div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
       <div className="card-body-flush">
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)', color: 'var(--fg-2)', fontSize: 13, lineHeight: 1.5 }}>
-          {project.objective}
+          <InlineEdit
+            value={project.objective}
+            onSave={(v) => actions.updateProject(project.id, { objective: v })}
+            multiline
+            placeholder="Objective — what outcome does this project deliver?"
+          />
         </div>
+
+        {/* Column headers */}
         <div className="sc-row" style={{ color: 'var(--fg-4)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>
           <span>Criterion</span>
-          <span style={{ textAlign: 'right' }}>Current</span>
+          <span style={{ textAlign: 'right' }}>Baseline</span>
           <span style={{ textAlign: 'right' }}>Target</span>
-          <span />
+          <span style={{ textAlign: 'right' }}>Final</span>
         </div>
-        {(project.successCriteria || []).map((sc) => {
-          const pct = (() => {
-            const cur = parseFloat(sc.current);
-            const tgt = parseFloat(sc.target);
-            if (isNaN(cur) || isNaN(tgt) || tgt === 0) return 0;
-            return Math.min(100, Math.round((cur / tgt) * 100));
-          })();
+        {criteria.map((sc) => {
+          const isBinary = sc.type === 'binary';
           if (editingId === sc.id) {
-            return (
-              <div key={sc.id} style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-                <div className="row-2" style={{ marginBottom: 6 }}>
-                  <input className="input" placeholder="Criterion" value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} autoFocus />
-                  <input className="input" placeholder="Current" value={draft.current} onChange={(e) => setDraft({ ...draft, current: e.target.value })} style={{ width: 80 }} />
-                  <input className="input" placeholder="Target" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} style={{ width: 80 }} />
+            if (isBinary) {
+              return (
+                <div key={sc.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
+                  <div className="sc-row" style={{ border: 'none', padding: '0 14px', marginBottom: 6 }}>
+                    <input className="input" placeholder="Criterion" value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} autoFocus />
+                    <span />
+                    <span />
+                    <select className="select" value={draft.done ? 'delivered' : 'pending'} onChange={(e) => setDraft({ ...draft, done: e.target.value === 'delivered' })}>
+                      <option value="pending">Pending</option>
+                      <option value="delivered">Delivered</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0 14px' }}>
+                    <button className="btn btn-danger-ghost btn-sm" onClick={() => { actions.deleteSuccessCriterion(project.id, sc.id); setEditingId(null); }}>Delete</button>
+                    <button className="btn btn-sm" onClick={() => setEditingId(null)}>Cancel</button>
+                    <button className="btn btn-primary btn-sm" onClick={saveEdit}>Save</button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              );
+            }
+            return (
+              <div key={sc.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
+                <div className="sc-row" style={{ border: 'none', padding: '0 14px', marginBottom: 6 }}>
+                  <input className="input" placeholder="Criterion" value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} autoFocus />
+                  <input className="input" placeholder="Baseline" value={draft.current} onChange={(e) => setDraft({ ...draft, current: e.target.value })} style={{ textAlign: 'right' }} />
+                  <input className="input" placeholder="Target" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} style={{ textAlign: 'right' }} />
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center', minWidth: 0 }}>
+                    <input className="input" placeholder="Final" value={draft.final} onChange={(e) => setDraft({ ...draft, final: e.target.value })} style={{ textAlign: 'right', flex: 1, minWidth: 0 }} />
+                    <select className="select" style={{ width: 28, minWidth: 28, padding: '3px 1px', fontSize: 11, textAlign: 'center', flexShrink: 0,
+                      background: draft.finalResult === 'hit' ? 'var(--ok)' : draft.finalResult === 'missed' ? 'var(--danger)' : undefined,
+                      color: draft.finalResult ? '#fff' : undefined }}
+                      value={draft.finalResult || ''} onChange={(e) => setDraft({ ...draft, finalResult: e.target.value || '' })}>
+                      <option value="">—</option>
+                      <option value="hit">✓</option>
+                      <option value="missed">✗</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0 14px' }}>
                   <button className="btn btn-danger-ghost btn-sm" onClick={() => { actions.deleteSuccessCriterion(project.id, sc.id); setEditingId(null); }}>Delete</button>
                   <button className="btn btn-sm" onClick={() => setEditingId(null)}>Cancel</button>
                   <button className="btn btn-primary btn-sm" onClick={saveEdit}>Save</button>
@@ -749,16 +837,45 @@ function SuccessCriteriaCard({ project }) {
               </div>
             );
           }
+          if (isBinary) {
+            return (
+              <div className="sc-row sc-row-editable" key={sc.id} onClick={() => startEdit(sc)} title="Click to edit">
+                <div className="sc-row-label">
+                  <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginBottom: 2 }}>{displayIds[sc.id] || sc.id.toUpperCase()}</div>
+                  {sc.text}
+                </div>
+                <div className="sc-row-val" />
+                <div className="sc-row-val" />
+                <div className="sc-row-val">
+                  <span className={`pill pill-${sc.done ? 'ok' : 'warn'}`} style={{ fontSize: 10.5 }}>{sc.done ? 'Delivered' : 'Pending'}</span>
+                </div>
+              </div>
+            );
+          }
           return (
             <div className="sc-row sc-row-editable" key={sc.id} onClick={() => startEdit(sc)} title="Click to edit">
-              <div className="sc-row-label">{sc.text}</div>
+              <div className="sc-row-label">
+                <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginBottom: 2 }}>{displayIds[sc.id] || sc.id.toUpperCase()}</div>
+                {sc.text}
+              </div>
               <div className="sc-row-val">{sc.current}</div>
-              <div className="sc-row-val" style={{ color: 'var(--fg-4)' }}>{sc.target}</div>
-              <Progress value={pct} tone={pct >= 80 ? 'ok' : pct >= 40 ? 'warn' : 'danger'} />
+              <div className="sc-row-val">{sc.target}</div>
+              <div className="sc-row-val">
+                {sc.final ? (
+                  <span style={{
+                    padding: '2px 6px', borderRadius: 4, fontSize: 12,
+                    background: sc.finalResult === 'hit' ? 'var(--ok)' : sc.finalResult === 'missed' ? 'var(--danger)' : 'transparent',
+                    color: sc.finalResult ? '#fff' : 'inherit',
+                  }}>{sc.final}</span>
+                ) : (
+                  <span className="pill pill-warn" style={{ fontSize: 10.5 }}>Pending</span>
+                )}
+              </div>
             </div>
           );
         })}
-        {(!project.successCriteria || project.successCriteria.length === 0) && (
+
+        {criteria.length === 0 && (
           <div style={{ padding: '14px', color: 'var(--fg-4)', fontSize: 12, textAlign: 'center' }}>No criteria yet — click Add to define success.</div>
         )}
       </div>
@@ -878,19 +995,25 @@ function MilestoneTimeline({ project, milestones }) {
   );
 }
 
-function MilestoneRow({ milestone: m }) {
+function MilestoneRow({ milestone: m, tasks = [], expanded, onToggleExpand, displayIds = {} }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState({ name: m.name, description: m.description || '', date: m.date, deliverable: m.deliverable || '' });
+  const linkedTasks = tasks.filter((t) => t.milestoneId === m.id);
+  const doneCount = linkedTasks.filter((t) => t.status === 'done').length;
 
   return (
     <>
-      <div className="ms-row ms-row-hoverable" onClick={() => setEditing(true)}>
+      <div className="ms-row ms-row-hoverable" onClick={() => onToggleExpand && onToggleExpand(m.id)}>
+        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} style={{ color: 'var(--fg-4)', flexShrink: 0 }} />
         <span className={`ms-row-bullet tl-ms-${m.status}`} />
         <div>
           <div style={{ fontWeight: 500 }}>{m.name}</div>
           {m.description && <div style={{ color: 'var(--fg-3)', fontSize: 11.5, marginTop: 1 }}>{m.description}</div>}
           {m.deliverable && <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, marginTop: m.description ? 6 : 2 }}>→ {m.deliverable}</div>}
         </div>
+        <span className="mono" style={{ fontSize: 10.5, color: doneCount === linkedTasks.length && linkedTasks.length > 0 ? 'var(--ok)' : 'var(--fg-4)', whiteSpace: 'nowrap' }}>
+          {linkedTasks.length > 0 ? `${doneCount}/${linkedTasks.length} tasks` : ''}
+        </span>
         {m.status === 'done' && m.completedDate ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>due {fmtDate(m.date)}</span>
@@ -909,6 +1032,29 @@ function MilestoneRow({ milestone: m }) {
         </select>
         <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setEditing(true); }}><Icon name="edit" size={12} /></button>
       </div>
+      {expanded && (
+        <div className="pq-detail" style={{ marginLeft: 24, borderLeft: '2px solid var(--border)', paddingLeft: 12, paddingBottom: 8 }}>
+          <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', display: 'block', marginBottom: 6 }}>{displayIds[m.id] || m.id.toUpperCase()}</span>
+          {linkedTasks.length === 0 ? (
+            <div style={{ color: 'var(--fg-4)', fontSize: 12, fontStyle: 'italic', padding: '6px 0' }}>No tasks linked to this milestone</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' }}>
+              {linkedTasks.map((t) => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', borderRadius: 4, fontSize: 12 }}>
+                  <input type="checkbox" checked={t.status === 'done'}
+                    onChange={() => actions.updateTask(t.id, { status: t.status === 'done' ? 'todo' : 'done' })}
+                    onClick={(e) => e.stopPropagation()} />
+                  <span style={{ flex: 1, textDecoration: t.status === 'done' ? 'line-through' : 'none', color: t.status === 'done' ? 'var(--fg-4)' : 'var(--fg-1)' }}>{t.title}</span>
+                  <span className={`pill pill-${t.status === 'done' ? 'ok' : t.status === 'blocked' ? 'danger' : t.status === 'in-progress' ? 'info' : 'muted'}`} style={{ fontSize: 10 }}>
+                    {t.status}
+                  </span>
+                  {t.priority && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{t.priority}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {editing && (
         <Modal open title="Edit milestone" onClose={() => setEditing(false)}>
           <div className="field">
@@ -951,8 +1097,9 @@ function MilestoneRow({ milestone: m }) {
   );
 }
 
-function MilestonesTab({ project, milestones }) {
+function MilestonesTab({ project, milestones, tasks, displayIds = {} }) {
   const [adding, setAdding] = React.useState(false);
+  const [expandedId, setExpandedId] = React.useState(null);
   const [draft, setDraft] = React.useState({ name: '', description: '', date: '', deliverable: '' });
 
   return (
@@ -993,7 +1140,7 @@ function MilestonesTab({ project, milestones }) {
         </div>
         {milestones.length === 0 ? (
           <EmptyState title="No milestones yet" icon="flag" />
-        ) : milestones.map((m) => <MilestoneRow key={m.id} milestone={m} />)}
+        ) : milestones.map((m) => <MilestoneRow key={m.id} milestone={m} tasks={tasks} expanded={expandedId === m.id} onToggleExpand={(id) => setExpandedId(expandedId === id ? null : id)} displayIds={displayIds} />)}
       </div>
     </>
   );

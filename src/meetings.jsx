@@ -169,8 +169,16 @@ function MtgInlinePanel({ meeting: m, state, onOpenTask }) {
   const emptyDec = { kind: 'decision', title: '', body: '', context: '', options: '', reversibility: 'reversible', tags: '', projectId: defaultProjectId, date: todayStr };
   const [decDraft, setDecDraft] = React.useState(emptyDec);
 
+  const emptyQ = { kind: 'question', title: '', body: '', resolution: '', tags: '', projectId: defaultProjectId, date: todayStr };
+  const [qDraft, setQDraft] = React.useState(emptyQ);
+  const [addingQuestion, setAddingQuestion] = React.useState(false);
+  const [editingQId, setEditingQId] = React.useState(null);
+  const [editQDraft, setEditQDraft] = React.useState(null);
+  const [expandedQId, setExpandedQId] = React.useState(null);
+
   const linkedTasks = (state.tasks || []).filter((t) => t.meetingId === m.id);
   const linkedDecisions = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision');
+  const linkedQuestions = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'question');
 
   const startEditTask = (t) => {
     setEditTaskDraft({ title: t.title, status: t.status, priority: t.priority, dueDate: t.dueDate || null, estimate: t.estimate || 1, objectiveId: t.objectiveId || '', description: t.description || '', source: t.source || 'planned', projectId: t.projectId || defaultProjectId, dependsOn: t.dependsOn || [] });
@@ -182,6 +190,12 @@ function MtgInlinePanel({ meeting: m, state, onOpenTask }) {
     setEditDecDraft({ title: n.title, body: n.body || '', context: n.context || '', options: n.options || '', reversibility: n.reversibility || 'reversible', tags: (n.tags || []).join(', '), projectId: n.projectId || defaultProjectId, date: n.date || todayStr });
     setEditingDecId(n.id);
     setAddingDecision(false);
+  };
+
+  const startEditQ = (n) => {
+    setEditQDraft({ title: n.title, body: n.body || '', resolution: n.resolution || '', tags: (n.tags || []).join(', '), projectId: n.projectId || defaultProjectId, date: n.date || todayStr });
+    setEditingQId(n.id);
+    setAddingQuestion(false);
   };
 
   return (
@@ -263,6 +277,71 @@ function MtgInlinePanel({ meeting: m, state, onOpenTask }) {
         })}
       </div>
 
+      {/* Questions */}
+      <div className="pq-section">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="pq-section-label" style={{ marginBottom: 0 }}>Questions</div>
+          <button className="btn btn-sm" onClick={() => { setAddingQuestion(!addingQuestion); setEditingQId(null); }}><Icon name="plus" size={10} /> Add</button>
+        </div>
+        {addingQuestion && (
+          <MtgQuestionForm draft={qDraft} setDraft={setQDraft} projects={projects} autoFocus
+            onCancel={() => { setQDraft(emptyQ); setAddingQuestion(false); }}
+            onSave={() => {
+              actions.addNote({ kind: 'question', title: qDraft.title, body: qDraft.body, resolution: qDraft.resolution, projectId: qDraft.projectId, date: qDraft.date, meetingId: m.id, tags: qDraft.tags.split(',').map((s) => s.trim()).filter(Boolean) });
+              setQDraft(emptyQ); setAddingQuestion(false);
+            }} />
+        )}
+        {linkedQuestions.length === 0 && !addingQuestion && <div style={{ color: 'var(--fg-4)', fontSize: 12 }}>No questions logged.</div>}
+        {linkedQuestions.map((n) => {
+          const p = projects.find((pp) => pp.id === n.projectId);
+          if (editingQId === n.id && editQDraft) {
+            return (
+              <MtgQuestionForm key={n.id} draft={editQDraft} setDraft={setEditQDraft} projects={projects}
+                onCancel={() => { setEditingQId(null); setEditQDraft(null); }}
+                onDelete={() => { if (confirm('Delete question?')) { actions.deleteNote(n.id); setEditingQId(null); setEditQDraft(null); } }}
+                onSave={() => {
+                  actions.updateNote(n.id, { title: editQDraft.title, body: editQDraft.body, resolution: editQDraft.resolution, projectId: editQDraft.projectId, date: editQDraft.date, tags: editQDraft.tags.split(',').map((s) => s.trim()).filter(Boolean) });
+                  setEditingQId(null); setEditQDraft(null);
+                }} />
+            );
+          }
+          if (expandedQId === n.id) {
+            return (
+              <div key={n.id} style={{ padding: '10px 0', borderTop: '1px solid var(--line)', cursor: 'pointer' }} onClick={() => setExpandedQId(null)}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Pill tone="warn" style={{ fontSize: 9.5, flexShrink: 0 }}>question</Pill>
+                  <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{n.title}</span>
+                  {p && <span className="pcard-code" style={{ fontSize: 9.5 }}>{p.code}</span>}
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{fmtDate(n.date)}</span>
+                </div>
+                {n.body && <div style={{ marginBottom: 8 }}><div className="pq-section-label">Context</div><div className="pq-section-val" style={{ color: 'var(--fg-3)' }}>{n.body}</div></div>}
+                {n.resolution && <div style={{ marginBottom: 8 }}><div className="pq-section-label">Resolution</div><div className="pq-section-val">{n.resolution}</div></div>}
+                {(n.tags || []).length > 0 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>{n.tags.map((tag) => <span key={tag} className="pill pill-ghost">{tag}</span>)}</div>}
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete question?')) { actions.deleteNote(n.id); setExpandedQId(null); } }}>Delete</button>
+                  <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setExpandedQId(null); startEditQ(n); }}><Icon name="edit" size={11} /> Edit</button>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={n.id} className="workload-task-row" style={{ cursor: 'pointer', alignItems: 'flex-start', padding: '7px 0' }}
+              onClick={() => setExpandedQId(expandedQId === n.id ? null : n.id)}>
+              <Pill tone="warn" style={{ fontSize: 9.5, flexShrink: 0 }}>question</Pill>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 13 }} className="truncate">{n.title}</div>
+                {n.body && <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 2 }} className="truncate">{n.body}</div>}
+              </div>
+              {p && <span className="pcard-code" style={{ fontSize: 9.5, flexShrink: 0 }}>{p.code}</span>}
+              <button className="btn btn-ghost btn-sm" style={{ padding: '2px 6px', flexShrink: 0 }}
+                onClick={(e) => { e.stopPropagation(); if (confirm('Delete question?')) actions.deleteNote(n.id); }}>
+                <Icon name="trash" size={10} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
       {/* Tasks */}
       <div className="pq-section" style={{ marginBottom: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -322,6 +401,7 @@ function MeetingRow({ meeting: m, projects, state, expanded, onToggleExpand, onE
   const tagged = (projects || []).filter((p) => (m.projectIds || []).includes(p.id));
   const linkedTasks = (state.tasks || []).filter((t) => t.meetingId === m.id);
   const linkedDecisions = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision');
+  const linkedQuestions = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'question');
   const recLabel = m.recurrence && m.recurrence !== 'none' ? MTG_RECURRENCE[m.recurrence] : null;
   const todayIso = new Date().toISOString().slice(0, 10);
   const isUpcoming = m.date >= todayIso;
@@ -378,7 +458,7 @@ function MeetingRow({ meeting: m, projects, state, expanded, onToggleExpand, onE
               )}
               <span className="pq-meta-sep" />
               <span className="pq-meta-item mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                {linkedTasks.length} task{linkedTasks.length !== 1 ? 's' : ''} · {linkedDecisions.length} decision{linkedDecisions.length !== 1 ? 's' : ''}
+                {linkedTasks.length} task{linkedTasks.length !== 1 ? 's' : ''} · {linkedDecisions.length} decision{linkedDecisions.length !== 1 ? 's' : ''} · {linkedQuestions.length} question{linkedQuestions.length !== 1 ? 's' : ''}
               </span>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -644,6 +724,47 @@ function MtgDecisionForm({ draft, setDraft, projects, onSave, onCancel, onDelete
   );
 }
 
+function MtgQuestionForm({ draft, setDraft, projects, onSave, onCancel, onDelete, autoFocus }) {
+  return (
+    <div style={{ padding: '14px 0', borderTop: '1px solid var(--line)' }}>
+      <div className="field">
+        <span className="field-label">Question</span>
+        <input className="input" value={draft.title} autoFocus={autoFocus} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="What are you trying to answer?" />
+      </div>
+      <div className="row-2">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Project</span>
+          <select className="select" value={draft.projectId} onChange={(e) => setDraft({ ...draft, projectId: e.target.value })}>
+            <option value="">Select project…</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name.split('—')[1]?.trim() || p.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <span className="field-label">Date</span>
+          <input className="input" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+        </div>
+      </div>
+      <div className="field">
+        <span className="field-label">Context</span>
+        <textarea className="input" rows={2} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} placeholder="What background is needed to understand this?" />
+      </div>
+      <div className="field">
+        <span className="field-label">Resolution</span>
+        <textarea className="input" rows={2} value={draft.resolution} onChange={(e) => setDraft({ ...draft, resolution: e.target.value })} placeholder="How was this resolved?" />
+      </div>
+      <div className="field">
+        <span className="field-label">Tags (comma-separated)</span>
+        <input className="input" value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} />
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+        {onDelete && <button className="btn btn-danger-ghost btn-sm" onClick={onDelete}>Delete</button>}
+        <button className="btn btn-sm" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary btn-sm" disabled={!draft.title || !draft.projectId} onClick={onSave}>Save</button>
+      </div>
+    </div>
+  );
+}
+
 function MtgDetail({ meeting: m, state, onOpenProject, onOpenTask }) {
   const projects = state.projects || [];
   const [editing, setEditing] = React.useState(false);
@@ -660,6 +781,10 @@ function MtgDetail({ meeting: m, state, onOpenProject, onOpenTask }) {
   const [addingDecision, setAddingDecision] = React.useState(false);
   const [editingDecId, setEditingDecId] = React.useState(null);
   const [expandedDecId, setExpandedDecId] = React.useState(null);
+  const [addingQuestion, setAddingQuestion] = React.useState(false);
+  const [editingQId, setEditingQId] = React.useState(null);
+  const [editQDraft, setEditQDraft] = React.useState(null);
+  const [expandedQId, setExpandedQId] = React.useState(null);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const defaultProjectId = (m.projectIds || [])[0] || '';
@@ -671,12 +796,15 @@ function MtgDetail({ meeting: m, state, onOpenProject, onOpenTask }) {
   };
   const [decDraft, setDecDraft] = React.useState(emptyDec);
   const [editDecDraft, setEditDecDraft] = React.useState(null);
+  const emptyQ = { kind: 'question', title: '', body: '', resolution: '', tags: '', projectId: defaultProjectId, date: todayStr };
+  const [qDraft, setQDraft] = React.useState(emptyQ);
 
   const tagged = projects.filter((p) => (m.projectIds || []).includes(p.id));
   const recLabel = m.recurrence && m.recurrence !== 'none' ? MTG_RECURRENCE[m.recurrence] : null;
 
   const linkedTasks = (state.tasks || []).filter((t) => t.meetingId === m.id);
   const linkedDecisions = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'decision');
+  const linkedQuestions = (state.notes || []).filter((n) => n.meetingId === m.id && n.kind === 'question');
 
   if (editing) {
     return (
@@ -705,6 +833,12 @@ function MtgDetail({ meeting: m, state, onOpenProject, onOpenTask }) {
     });
     setEditingDecId(n.id);
     setAddingDecision(false);
+  };
+
+  const startEditQ = (n) => {
+    setEditQDraft({ title: n.title, body: n.body || '', resolution: n.resolution || '', tags: (n.tags || []).join(', '), projectId: n.projectId || defaultProjectId, date: n.date || todayStr });
+    setEditingQId(n.id);
+    setAddingQuestion(false);
   };
 
   return (
@@ -829,6 +963,90 @@ function MtgDetail({ meeting: m, state, onOpenProject, onOpenTask }) {
               {p && <span className="pcard-code" style={{ fontSize: 9.5, flexShrink: 0 }}>{p.code}</span>}
               <button className="btn btn-ghost btn-sm" style={{ padding: '2px 6px', flexShrink: 0 }}
                 onClick={(e) => { e.stopPropagation(); if (confirm('Delete decision?')) actions.deleteNote(n.id); }}>
+                <Icon name="trash" size={10} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Questions */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="dec-section-label" style={{ marginBottom: 0 }}>Questions</div>
+          <button className="btn btn-sm" onClick={() => { setAddingQuestion(!addingQuestion); setEditingQId(null); }}><Icon name="plus" size={10} /> Add</button>
+        </div>
+        {addingQuestion && (
+          <MtgQuestionForm
+            draft={qDraft} setDraft={setQDraft} projects={projects} autoFocus
+            onCancel={() => { setQDraft(emptyQ); setAddingQuestion(false); }}
+            onSave={() => {
+              actions.addNote({
+                kind: 'question', title: qDraft.title, body: qDraft.body,
+                resolution: qDraft.resolution, projectId: qDraft.projectId, date: qDraft.date,
+                meetingId: m.id, tags: qDraft.tags.split(',').map((s) => s.trim()).filter(Boolean),
+              });
+              setQDraft(emptyQ);
+              setAddingQuestion(false);
+            }}
+          />
+        )}
+        {linkedQuestions.length === 0 && !addingQuestion && <div style={{ color: 'var(--fg-4)', fontSize: 12 }}>No questions logged.</div>}
+        {linkedQuestions.map((n) => {
+          const p = projects.find((pp) => pp.id === n.projectId);
+          if (editingQId === n.id && editQDraft) {
+            return (
+              <MtgQuestionForm key={n.id}
+                draft={editQDraft} setDraft={setEditQDraft} projects={projects}
+                onCancel={() => { setEditingQId(null); setEditQDraft(null); }}
+                onDelete={() => {
+                  if (confirm('Delete this question?')) {
+                    actions.deleteNote(n.id);
+                    setEditingQId(null); setEditQDraft(null);
+                  }
+                }}
+                onSave={() => {
+                  actions.updateNote(n.id, {
+                    title: editQDraft.title, body: editQDraft.body, resolution: editQDraft.resolution,
+                    projectId: editQDraft.projectId, date: editQDraft.date,
+                    tags: editQDraft.tags.split(',').map((s) => s.trim()).filter(Boolean),
+                  });
+                  setEditingQId(null); setEditQDraft(null);
+                }}
+              />
+            );
+          }
+          if (expandedQId === n.id) {
+            return (
+              <div key={n.id} style={{ padding: '10px 0', borderTop: '1px solid var(--line)', cursor: 'pointer' }}
+                onClick={() => setExpandedQId(null)}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Pill tone="warn" style={{ fontSize: 9.5, flexShrink: 0 }}>question</Pill>
+                  <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{n.title}</span>
+                  {p && <span className="pcard-code" style={{ fontSize: 9.5 }}>{p.code}</span>}
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{fmtDate(n.date)}</span>
+                </div>
+                {n.body && <div style={{ marginBottom: 8 }}><div className="dec-section-label" style={{ marginBottom: 3 }}>Context</div><div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{n.body}</div></div>}
+                {n.resolution && <div style={{ marginBottom: 8 }}><div className="dec-section-label" style={{ marginBottom: 3 }}>Resolution</div><div style={{ fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.5 }}>{n.resolution}</div></div>}
+                {(n.tags || []).length > 0 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>{n.tags.map((tag) => <span key={tag} className="pill pill-ghost">{tag}</span>)}</div>}
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-danger-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (confirm('Delete question?')) { actions.deleteNote(n.id); setExpandedQId(null); } }}>Delete</button>
+                  <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setExpandedQId(null); startEditQ(n); }}><Icon name="edit" size={11} /> Edit</button>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={n.id} className="workload-task-row" style={{ cursor: 'pointer', alignItems: 'flex-start', padding: '7px 0' }}
+              onClick={() => setExpandedQId(expandedQId === n.id ? null : n.id)}>
+              <Pill tone="warn" style={{ fontSize: 9.5, flexShrink: 0 }}>question</Pill>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 13 }} className="truncate">{n.title}</div>
+                {n.body && <div style={{ fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.5, marginTop: 2 }} className="truncate">{n.body}</div>}
+              </div>
+              {p && <span className="pcard-code" style={{ fontSize: 9.5, flexShrink: 0 }}>{p.code}</span>}
+              <button className="btn btn-ghost btn-sm" style={{ padding: '2px 6px', flexShrink: 0 }}
+                onClick={(e) => { e.stopPropagation(); if (confirm('Delete question?')) actions.deleteNote(n.id); }}>
                 <Icon name="trash" size={10} />
               </button>
             </div>

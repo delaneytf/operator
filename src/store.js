@@ -164,6 +164,17 @@ function useStore() {
 const uid = (prefix = 'id') => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
+// Undo stack (in-memory only, not persisted)
+const undoStack = [];
+const UNDO_MAX = 20;
+function withUndo(description, sliceKeys, fn) {
+  const snapshot = {};
+  sliceKeys.forEach(k => { snapshot[k] = structuredClone(STATE[k]); });
+  undoStack.push({ description, snapshot, timestamp: Date.now() });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  fn();
+}
+
 const actions = {
   setMeta(patch) {
     setState((s) => ({ ...s, meta: { ...s.meta, ...patch } }));
@@ -185,42 +196,53 @@ const actions = {
       estimate: 1,
       ...task,
     };
-    setState((s) => ({ ...s, tasks: [...s.tasks, t], meta: { ...s.meta, nextTaskId: seq + 1 } }));
+    withUndo(`add task "${t.title || task.title}"`, ['tasks', 'meta'], () => {
+      setState((s) => ({ ...s, tasks: [...s.tasks, t], meta: { ...s.meta, nextTaskId: seq + 1 } }));
+    });
     return t;
   },
   updateTask(id, patch) {
-    setState((s) => ({
-      ...s,
-      tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch, updatedAt: todayStr() } : t)),
-    }));
+    const task = STATE.tasks.find(t => t.id === id);
+    withUndo(`update task "${task?.title || id}"`, ['tasks'], () => {
+      setState((s) => ({
+        ...s,
+        tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch, updatedAt: todayStr() } : t)),
+      }));
+    });
   },
   toggleTaskDone(id, completionNote) {
-    setState((s) => ({
-      ...s,
-      tasks: s.tasks.map((t) => {
-        if (t.id !== id) return t;
-        const wasDone = t.status === 'done';
-        const today = todayStr();
-        const daysEarlyLate = (!wasDone && t.dueDate)
-          ? Math.round((new Date(t.dueDate) - new Date(today)) / 86400000)
-          : null; // positive = early, negative = late
-        return {
-          ...t,
-          status: wasDone ? 'todo' : 'done',
-          completedAt: wasDone ? null : today,
-          daysEarlyLate: wasDone ? null : daysEarlyLate,
-          completionNote: wasDone ? null : (completionNote || null),
-          updatedAt: today,
-        };
-      }),
-    }));
+    const task = STATE.tasks.find(t => t.id === id);
+    withUndo(`toggle task "${task?.title || id}" done`, ['tasks'], () => {
+      setState((s) => ({
+        ...s,
+        tasks: s.tasks.map((t) => {
+          if (t.id !== id) return t;
+          const wasDone = t.status === 'done';
+          const today = todayStr();
+          const daysEarlyLate = (!wasDone && t.dueDate)
+            ? Math.round((new Date(t.dueDate) - new Date(today)) / 86400000)
+            : null;
+          return {
+            ...t,
+            status: wasDone ? 'todo' : 'done',
+            completedAt: wasDone ? null : today,
+            daysEarlyLate: wasDone ? null : daysEarlyLate,
+            completionNote: wasDone ? null : (completionNote || null),
+            updatedAt: today,
+          };
+        }),
+      }));
+    });
   },
   deleteTask(id) {
-    setState((s) => ({
-      ...s,
-      tasks: s.tasks.filter((t) => t.id !== id),
-      blockers: s.blockers.filter((b) => b.taskId !== id),
-    }));
+    const task = STATE.tasks.find(t => t.id === id);
+    withUndo(`delete task "${task?.title || id}"`, ['tasks', 'blockers'], () => {
+      setState((s) => ({
+        ...s,
+        tasks: s.tasks.filter((t) => t.id !== id),
+        blockers: s.blockers.filter((b) => b.taskId !== id),
+      }));
+    });
   },
   reorderTasks(projectId, priority, orderedIds) {
     setState((s) => ({
@@ -304,29 +326,37 @@ const actions = {
   // Milestones
   addMilestone(m) {
     const ms = { id: uid('m'), status: 'planned', ...m };
-    setState((s) => ({ ...s, milestones: [...s.milestones, ms] }));
+    withUndo(`add milestone "${ms.name || m.name}"`, ['milestones'], () => {
+      setState((s) => ({ ...s, milestones: [...s.milestones, ms] }));
+    });
   },
   updateMilestone(id, patch) {
-    setState((s) => ({
-      ...s,
-      milestones: s.milestones.map((m) => {
-        if (m.id !== id) return m;
-        const updated = { ...m, ...patch };
-        if (patch.status === 'done' && m.status !== 'done') {
-          const today = todayStr();
-          updated.completedDate = today;
-          updated.daysEarlyLate = Math.round((new Date(m.date) - new Date(today)) / 86400000);
-        }
-        if (patch.status && patch.status !== 'done' && m.status === 'done') {
-          updated.completedDate = null;
-          updated.daysEarlyLate = null;
-        }
-        return updated;
-      }),
-    }));
+    const ms = STATE.milestones.find(m => m.id === id);
+    withUndo(`update milestone "${ms?.name || id}"`, ['milestones'], () => {
+      setState((s) => ({
+        ...s,
+        milestones: s.milestones.map((m) => {
+          if (m.id !== id) return m;
+          const updated = { ...m, ...patch };
+          if (patch.status === 'done' && m.status !== 'done') {
+            const today = todayStr();
+            updated.completedDate = today;
+            updated.daysEarlyLate = Math.round((new Date(m.date) - new Date(today)) / 86400000);
+          }
+          if (patch.status && patch.status !== 'done' && m.status === 'done') {
+            updated.completedDate = null;
+            updated.daysEarlyLate = null;
+          }
+          return updated;
+        }),
+      }));
+    });
   },
   deleteMilestone(id) {
-    setState((s) => ({ ...s, milestones: s.milestones.filter((m) => m.id !== id) }));
+    const ms = STATE.milestones.find(m => m.id === id);
+    withUndo(`delete milestone "${ms?.name || id}"`, ['milestones'], () => {
+      setState((s) => ({ ...s, milestones: s.milestones.filter((m) => m.id !== id) }));
+    });
   },
 
   // Notes
@@ -334,14 +364,22 @@ const actions = {
     const existingMax = Math.max(0, ...STATE.notes.map((x) => { const num = parseInt(x.id.replace(/^n-/, '')); return isNaN(num) ? 0 : num; }));
     const seq = Math.max(STATE.meta.nextNoteId || 0, existingMax + 1);
     const note = { id: `n-${seq}`, kind: 'decision', date: todayStr(), tags: [], ...n };
-    setState((s) => ({ ...s, notes: [note, ...s.notes], meta: { ...s.meta, nextNoteId: seq + 1 } }));
+    withUndo(`add ${note.kind} "${note.title || n.title}"`, ['notes', 'meta'], () => {
+      setState((s) => ({ ...s, notes: [note, ...s.notes], meta: { ...s.meta, nextNoteId: seq + 1 } }));
+    });
     return note;
   },
   updateNote(id, patch) {
-    setState((s) => ({ ...s, notes: s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
+    const note = STATE.notes.find(n => n.id === id);
+    withUndo(`update ${note?.kind || 'note'} "${note?.title || id}"`, ['notes'], () => {
+      setState((s) => ({ ...s, notes: s.notes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
+    });
   },
   deleteNote(id) {
-    setState((s) => ({ ...s, notes: s.notes.filter((n) => n.id !== id) }));
+    const note = STATE.notes.find(n => n.id === id);
+    withUndo(`delete ${note?.kind || 'note'} "${note?.title || id}"`, ['notes'], () => {
+      setState((s) => ({ ...s, notes: s.notes.filter((n) => n.id !== id) }));
+    });
   },
 
   // Risks
@@ -350,31 +388,27 @@ const actions = {
     const seq = Math.max(STATE.meta.nextRiskId || 0, existingMax + 1);
     const risk = {
       id: `r-${seq}`,
-      severity: 3,
-      likelihood: 3,
-      mitigation: '',
-      owner: 'You',
-      status: 'open',
-      createdAt: todayStr(),
-      updatedAt: todayStr(),
-      category: '',
-      response: '',
-      description: '',
-      impact: '',
-      trigger: '',
-      contingency: '',
-      dueDate: '',
-      reviewDate: '',
+      severity: 3, likelihood: 3, mitigation: '', owner: 'You', status: 'open',
+      createdAt: todayStr(), updatedAt: todayStr(),
+      category: '', response: '', description: '', impact: '', trigger: '', contingency: '', dueDate: '', reviewDate: '',
       ...r,
     };
-    setState((s) => ({ ...s, risks: [...s.risks, risk], meta: { ...s.meta, nextRiskId: seq + 1 } }));
+    withUndo(`add risk "${risk.title || r.title}"`, ['risks', 'meta'], () => {
+      setState((s) => ({ ...s, risks: [...s.risks, risk], meta: { ...s.meta, nextRiskId: seq + 1 } }));
+    });
     return risk;
   },
   updateRisk(id, patch) {
-    setState((s) => ({ ...s, risks: s.risks.map((r) => (r.id === id ? { ...r, ...patch, updatedAt: todayStr() } : r)) }));
+    const risk = STATE.risks.find(r => r.id === id);
+    withUndo(`update risk "${risk?.title || id}"`, ['risks'], () => {
+      setState((s) => ({ ...s, risks: s.risks.map((r) => (r.id === id ? { ...r, ...patch, updatedAt: todayStr() } : r)) }));
+    });
   },
   deleteRisk(id) {
-    setState((s) => ({ ...s, risks: s.risks.filter((r) => r.id !== id) }));
+    const risk = STATE.risks.find(r => r.id === id);
+    withUndo(`delete risk "${risk?.title || id}"`, ['risks'], () => {
+      setState((s) => ({ ...s, risks: s.risks.filter((r) => r.id !== id) }));
+    });
   },
   setRiskFields(fields) {
     setState((s) => ({ ...s, meta: { ...s.meta, riskFields: fields } }));
@@ -383,38 +417,52 @@ const actions = {
   // Meetings
   addMeeting(m) {
     const meeting = { id: uid('mt'), createdAt: todayStr(), attendees: '', notes: '', ...m };
-    setState((s) => ({ ...s, meetings: [meeting, ...(s.meetings || [])] }));
+    withUndo(`add meeting "${meeting.title || m.title}"`, ['meetings'], () => {
+      setState((s) => ({ ...s, meetings: [meeting, ...(s.meetings || [])] }));
+    });
   },
   updateMeeting(id, patch) {
-    setState((s) => ({ ...s, meetings: (s.meetings || []).map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+    const meeting = (STATE.meetings || []).find(m => m.id === id);
+    withUndo(`update meeting "${meeting?.title || id}"`, ['meetings'], () => {
+      setState((s) => ({ ...s, meetings: (s.meetings || []).map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+    });
   },
   deleteMeeting(id) {
-    setState((s) => ({ ...s, meetings: (s.meetings || []).filter((m) => m.id !== id) }));
+    const meeting = (STATE.meetings || []).find(m => m.id === id);
+    withUndo(`delete meeting "${meeting?.title || id}"`, ['meetings'], () => {
+      setState((s) => ({ ...s, meetings: (s.meetings || []).filter((m) => m.id !== id) }));
+    });
   },
 
   // Blockers
   addBlocker(b) {
     const blocker = { id: uid('bl'), since: todayStr(), ...b };
-    setState((s) => ({
-      ...s,
-      blockers: [...s.blockers, blocker],
-      tasks: s.tasks.map((t) =>
-        t.id === b.taskId ? { ...t, status: 'blocked', blockers: [...(t.blockers || []), blocker.id] } : t
-      ),
-    }));
+    const task = STATE.tasks.find(t => t.id === b.taskId);
+    withUndo(`add blocker on "${task?.title || b.taskId}"`, ['blockers', 'tasks'], () => {
+      setState((s) => ({
+        ...s,
+        blockers: [...s.blockers, blocker],
+        tasks: s.tasks.map((t) =>
+          t.id === b.taskId ? { ...t, status: 'blocked', blockers: [...(t.blockers || []), blocker.id] } : t
+        ),
+      }));
+    });
   },
   resolveBlocker(id) {
-    setState((s) => {
-      const bl = s.blockers.find((b) => b.id === id);
-      return {
-        ...s,
-        blockers: s.blockers.filter((b) => b.id !== id),
-        tasks: s.tasks.map((t) => {
-          if (!bl || t.id !== bl.taskId) return t;
-          const remaining = (t.blockers || []).filter((x) => x !== id);
-          return { ...t, blockers: remaining, status: remaining.length ? t.status : 'todo' };
-        }),
-      };
+    const bl = STATE.blockers.find(b => b.id === id);
+    withUndo(`resolve blocker "${bl?.description || id}"`, ['blockers', 'tasks'], () => {
+      setState((s) => {
+        const blk = s.blockers.find((b) => b.id === id);
+        return {
+          ...s,
+          blockers: s.blockers.filter((b) => b.id !== id),
+          tasks: s.tasks.map((t) => {
+            if (!blk || t.id !== blk.taskId) return t;
+            const remaining = (t.blockers || []).filter((x) => x !== id);
+            return { ...t, blockers: remaining, status: remaining.length ? t.status : 'todo' };
+          }),
+        };
+      });
     });
   },
 
@@ -447,6 +495,12 @@ const actions = {
       ...s,
       chatThreads: (s.chatThreads || []).map((t) => t.id === threadId ? { ...t, messages: [...t.messages, msg] } : t),
     }));
+  },
+  deleteChatThread(id) {
+    setState((s) => ({ ...s, chatThreads: (s.chatThreads || []).filter((t) => t.id !== id) }));
+  },
+  updateChatThread(id, patch) {
+    setState((s) => ({ ...s, chatThreads: (s.chatThreads || []).map((t) => t.id === id ? { ...t, ...patch } : t) }));
   },
 
   // Task dependencies
@@ -486,7 +540,7 @@ const actions = {
 
   // Success criteria (stored on project)
   addSuccessCriterion(projectId, sc) {
-    const item = { id: uid('sc'), text: '', current: '', target: '', ...sc };
+    const item = { id: uid('sc'), text: '', type: 'metric', current: '', target: '', ...sc };
     setState((s) => ({
       ...s,
       projects: s.projects.map((p) =>
@@ -518,13 +572,21 @@ const actions = {
   // Calendar reminders
   addReminder(r) {
     const rem = { id: uid('rem'), date: todayStr(), title: '', note: '', createdAt: todayStr(), ...r };
-    setState((s) => ({ ...s, reminders: [...(s.reminders || []), rem] }));
+    withUndo(`add reminder "${rem.title || r.title}"`, ['reminders'], () => {
+      setState((s) => ({ ...s, reminders: [...(s.reminders || []), rem] }));
+    });
   },
   updateReminder(id, patch) {
-    setState((s) => ({ ...s, reminders: (s.reminders || []).map((r) => r.id === id ? { ...r, ...patch } : r) }));
+    const rem = (STATE.reminders || []).find(r => r.id === id);
+    withUndo(`update reminder "${rem?.title || id}"`, ['reminders'], () => {
+      setState((s) => ({ ...s, reminders: (s.reminders || []).map((r) => r.id === id ? { ...r, ...patch } : r) }));
+    });
   },
   deleteReminder(id) {
-    setState((s) => ({ ...s, reminders: (s.reminders || []).filter((r) => r.id !== id) }));
+    const rem = (STATE.reminders || []).find(r => r.id === id);
+    withUndo(`delete reminder "${rem?.title || id}"`, ['reminders'], () => {
+      setState((s) => ({ ...s, reminders: (s.reminders || []).filter((r) => r.id !== id) }));
+    });
   },
 
   // Daily plan artifacts (one per day, keyed by date)
@@ -559,8 +621,8 @@ const actions = {
   },
 
   // Jira / Confluence live data
-  setJiraData({ jiraProjects, jiraIssues, sprints }) {
-    setState((s) => ({ ...s, jiraProjects: jiraProjects || s.jiraProjects, jiraIssues: jiraIssues || s.jiraIssues, sprints: sprints || s.sprints }));
+  setJiraData({ jiraProjects, jiraIssues, sprints, boardColumns }) {
+    setState((s) => ({ ...s, jiraProjects: jiraProjects || s.jiraProjects, jiraIssues: jiraIssues || s.jiraIssues, sprints: sprints || s.sprints, jiraBoardColumns: boardColumns || s.jiraBoardColumns }));
   },
   setConfluenceData({ confluenceSpaces, confluencePages }) {
     setState((s) => ({ ...s, confluenceSpaces: confluenceSpaces || s.confluenceSpaces, confluencePages: confluencePages || s.confluencePages }));
@@ -599,6 +661,20 @@ const actions = {
     STATE = getMode() === 'local' ? buildEmptyState() : structuredClone(window.SEED);
     saveState(STATE);
     subscribers.forEach((fn) => fn());
+  },
+
+  // Undo
+  undo() {
+    if (!undoStack.length) return null;
+    const entry = undoStack.pop();
+    setState((s) => ({ ...s, ...entry.snapshot }));
+    return entry;
+  },
+  peekUndo() {
+    return undoStack.length ? undoStack[undoStack.length - 1] : null;
+  },
+  canUndo() {
+    return undoStack.length > 0;
   },
 };
 

@@ -47,6 +47,7 @@ const STATUS_LABEL = {
   done: 'Done',
 };
 const PROJECT_STATUS_LABEL = {
+  planned: 'Planned',
   'on-track': 'On track',
   'at-risk': 'At risk',
   blocked: 'Blocked',
@@ -157,6 +158,7 @@ function Icon({ name, size = 14, className = '' }) {
     edit: <><path d="M3 13 L3 10.5 L10.5 3 L13 5.5 L5.5 13 Z" /><line x1="9" y1="4.5" x2="11.5" y2="7" /></>,
     pin: <><path d="M10 2 L14 6 L11 7 L10 11 L5 6 L9 5 Z" /><line x1="5" y1="6" x2="2" y2="14" /></>,
     download: <><path d="M8 2 L8 10" /><polyline points="4.5 7 8 10.5 11.5 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></>,
+    upload: <><path d="M8 10 L8 2" /><polyline points="4.5 5 8 1.5 11.5 5" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></>,
     doc: <><path d="M4 2 L10 2 L12 4 L12 14 L4 14 Z" /><line x1="6" y1="6" x2="10" y2="6" /><line x1="6" y1="9" x2="10" y2="9" /><line x1="6" y1="12" x2="8.5" y2="12" /></>,
     milestone: <polygon points="8 2 13 8 8 14 3 8" />,
     bell: <><path d="M8 2 C5.5 2 4 4 4 6.5 L4 10 L2.5 12 L13.5 12 L12 10 L12 6.5 C12 4 10.5 2 8 2 Z" /><line x1="6.5" y1="12" x2="6.5" y2="13.5" /><line x1="9.5" y1="12" x2="9.5" y2="13.5" /><line x1="6.5" y1="13.5" x2="9.5" y2="13.5" /></>,

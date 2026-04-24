@@ -33,11 +33,13 @@ function ProgramView({ state, programId, onOpenProject }) {
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .slice(0, 8);
 
-  const STATUS_ORDER = { 'blocked': 0, 'at-risk': 1, 'on-track': 2, 'done': 3, 'closed': 4 };
+  const programIdx = (state.programs || []).findIndex(p => p.id === programId);
+  const programDisplayId = programIdx >= 0 ? `PG-${programIdx + 1}` : program.id.toUpperCase();
+  const STATUS_ORDER = { 'planned': -1, 'blocked': 0, 'at-risk': 1, 'on-track': 2, 'done': 3, 'closed': 4 };
   const sortedProjects = [...projects].sort((a, b) => (STATUS_ORDER[a.status] ?? 5) - (STATUS_ORDER[b.status] ?? 5));
 
   const startEdit = () => {
-    setHeaderDraft({ name: program.name, description: program.description || '', deliverable: program.deliverable || '' });
+    setHeaderDraft({ name: program.name, description: program.description || '', deliverable: program.deliverable || '', status: program.status || 'active' });
     setEditingHeader(true);
   };
   const saveEdit = () => {
@@ -57,6 +59,18 @@ function ProgramView({ state, programId, onOpenProject }) {
             <input className="input" style={{ fontSize: 20, fontWeight: 600 }}
               value={headerDraft.name}
               onChange={e => setHeaderDraft(d => ({ ...d, name: e.target.value }))} autoFocus />
+            <div className="field" style={{ marginBottom: 0 }}>
+              <span className="field-label">Status</span>
+              <select className="select" value={headerDraft.status} onChange={e => setHeaderDraft(d => ({ ...d, status: e.target.value }))}>
+                <option value="planned">Planned</option>
+                <option value="active">Active</option>
+                <option value="on-track">On track</option>
+                <option value="at-risk">At risk</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Completed</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
             <textarea className="input" rows={2} placeholder="Program description"
               value={headerDraft.description}
               onChange={e => setHeaderDraft(d => ({ ...d, description: e.target.value }))}
@@ -75,10 +89,10 @@ function ProgramView({ state, programId, onOpenProject }) {
               <div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{programCode}</div>
                 <div className="title-h1">{program.name.replace(/^P\d+\.\s*/, '')}</div>
+                <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{programDisplayId}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                {program.status === 'done' && <span className="pill pill-ok" style={{ fontSize: 11 }}>Completed</span>}
-                {program.status === 'closed' && <span className="pill pill-neutral" style={{ fontSize: 11 }}>Closed</span>}
+                <span className={`pill pill-${program.status === 'planned' ? 'info' : program.status === 'blocked' ? 'danger' : program.status === 'at-risk' ? 'warn' : program.status === 'done' ? 'ok' : program.status === 'closed' ? 'neutral' : 'ok'}`} style={{ fontSize: 11 }}>{program.status === 'on-track' ? 'On track' : program.status === 'at-risk' ? 'At risk' : program.status === 'planned' ? 'Planned' : program.status === 'done' ? 'Completed' : program.status === 'closed' ? 'Closed' : program.status === 'blocked' ? 'Blocked' : program.status || 'Active'}</span>
                 <button className="icon-btn" title="Edit program" onClick={startEdit}><Icon name="edit" size={13} /></button>
               </div>
             </div>

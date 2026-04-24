@@ -37,19 +37,19 @@ const SEED = {
       id: 'pg-1', name: 'P1. Product Launch',
       description: 'End-to-end launch of the 2.0 product line — website, pricing, and growth',
       deliverable: 'Live product site, published pricing tiers, onboarding conversion ≥ 40%',
-      createdAt: d(-60),
+      status: 'active', createdAt: d(-60),
     },
     {
       id: 'pg-2', name: 'P2. Platform Foundation',
       description: 'Core infrastructure upgrades to support scale — API, auth, and analytics',
       deliverable: 'API v2 GA, RBAC in prod, real-time analytics pipeline processing 10k events/day',
-      createdAt: d(-60),
+      status: 'active', createdAt: d(-60),
     },
     {
       id: 'pg-3', name: 'P3. Customer Growth',
       description: 'Post-launch customer success and retention — onboarding flow and help content',
       deliverable: 'Onboarding completion rate ≥ 70%, Help Center live with 50+ articles',
-      createdAt: d(-60),
+      status: 'active', createdAt: d(-60),
     },
   ],
 
@@ -67,6 +67,7 @@ const SEED = {
       successCriteria: [
         { id: 'sc-1-1-1', text: 'Core Web Vitals all green', current: 'Yellow', target: 'Green' },
         { id: 'sc-1-1-2', text: 'Conversion rate on pricing page', current: '2.1%', target: '≥ 4%' },
+        { id: 'sc-1-1-3', type: 'binary', text: 'Brand guidelines document approved', done: false },
       ],
       createdAt: d(-30),
     },
@@ -98,6 +99,7 @@ const SEED = {
       successCriteria: [
         { id: 'sc-2-1-1', text: 'Beta partner coverage', current: '3 partners', target: '≥ 5 partners' },
         { id: 'sc-2-1-2', text: 'API uptime in beta', current: '99.4%', target: '≥ 99.9%' },
+        { id: 'sc-2-1-3', type: 'binary', text: 'Beta partner onboarding guide published', done: true },
       ],
       createdAt: d(-45),
     },

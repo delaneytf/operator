@@ -433,7 +433,7 @@ function ProgramRow({ program, projects, state, collapsed, onToggle, onView }) {
   const avgPct = projects.length
     ? Math.round(projects.reduce((s, p) => s + (projectProgress(state, p.id).pct || 0), 0) / projects.length)
     : 0;
-  const effectiveStatus = (program.status === 'done' || program.status === 'closed')
+  const effectiveStatus = (program.status === 'done' || program.status === 'closed' || program.status === 'planned')
     ? program.status
     : (['blocked', 'at-risk', 'on-track', 'done'].find(s => projects.some(p => p.status === s)) || 'on-track');
   const bestPriority = [...projects].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])[0]?.priority;
