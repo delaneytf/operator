@@ -134,6 +134,30 @@ async function loadFromServer() {
   } catch {
     // Not running via server (opened as plain file) — that's fine
   }
+  // Sync env-based API keys into integrations connected status on boot
+  try {
+    const authRes = await fetch('/api/auth/status');
+    if (!authRes.ok) return;
+    const status = await authRes.json();
+    const integrations = STATE.meta?.integrations || {};
+    const patch = {};
+    Object.entries(status).forEach(([provider, s]) => {
+      if (s.connected && !integrations[provider]?.connected) {
+        const now = new Date().toISOString().slice(0, 10);
+        patch[provider] = {
+          connected: true, user: s.email || s.user || (s.source === 'env' ? '.env' : null),
+          site: s.site || null, connectedAt: s.savedAt?.slice(0, 10) || now, syncedAt: s.savedAt?.slice(0, 10) || now,
+          access: 'read', trackActivity: true, notifications: false, selectedScopes: [], authType: s.authType || 'apikey',
+        };
+      }
+    });
+    if (Object.keys(patch).length > 0) {
+      STATE = { ...STATE, meta: { ...STATE.meta, integrations: { ...integrations, ...patch } } };
+      saveState(STATE);
+      subscribers.forEach((fn) => fn());
+      console.log('[store] synced env integrations:', Object.keys(patch).join(', '));
+    }
+  } catch {}
 }
 
 // Subscriber list; React hook subscribes for re-renders.
@@ -621,8 +645,16 @@ const actions = {
   },
 
   // Jira / Confluence live data
-  setJiraData({ jiraProjects, jiraIssues, sprints, boardColumns }) {
-    setState((s) => ({ ...s, jiraProjects: jiraProjects || s.jiraProjects, jiraIssues: jiraIssues || s.jiraIssues, sprints: sprints || s.sprints, jiraBoardColumns: boardColumns || s.jiraBoardColumns }));
+  setJiraData({ jiraProjects, jiraIssues, sprints, boardColumns, boardColumnsByProject, issueTypesByProject }) {
+    setState((s) => ({
+      ...s,
+      jiraProjects: jiraProjects || s.jiraProjects,
+      jiraIssues: jiraIssues || s.jiraIssues,
+      sprints: sprints || s.sprints,
+      jiraBoardColumns: boardColumns || s.jiraBoardColumns,
+      jiraBoardColumnsByProject: boardColumnsByProject || s.jiraBoardColumnsByProject || {},
+      jiraIssueTypesByProject: issueTypesByProject || s.jiraIssueTypesByProject || {},
+    }));
   },
   setConfluenceData({ confluenceSpaces, confluencePages }) {
     setState((s) => ({ ...s, confluenceSpaces: confluenceSpaces || s.confluenceSpaces, confluencePages: confluencePages || s.confluencePages }));

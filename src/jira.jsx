@@ -44,17 +44,58 @@ function JiraProjectFilter({ jiraProjects, allIssues, selectedKeys, onChange }) 
   );
 }
 
-// ── Main Jira view ───────────────────────────────────────────────────────────
+// ── Type filter dropdown ────────────────────────────────────────────────────
 
-const BOARD_COLUMNS = ['To Do', 'In Progress', 'In Review', 'Ready for QA', 'In QA', 'Done'];
+function JiraTypeFilter({ issues, selectedTypes, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const types = [...new Set(issues.map(i => i.type))].sort();
+  const isAll = selectedTypes.size === 0;
+  const toggle = (t) => { const next = new Set(selectedTypes); if (next.has(t)) next.delete(t); else next.add(t); onChange(next); };
+  const filterLabel = isAll ? 'All types' : (() => { const t = [...selectedTypes]; return t.length <= 2 ? t.join(', ') : `${t.slice(0, 2).join(', ')} +${t.length - 2}`; })();
+  const Chk = ({ on }) => <span style={{ width: 14, height: 14, borderRadius: 3, border: '1.5px solid var(--line)', background: on ? 'var(--accent)' : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{on && <Icon name="check" size={9} style={{ color: '#fff' }} />}</span>;
+
+  if (types.length <= 1) return null;
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }} ref={ref}>
+      <button className={`btn btn-sm${!isAll ? ' btn-primary' : ''}`} style={{ fontSize: 11, gap: 5 }} onClick={() => setOpen(v => !v)}>
+        <Icon name="filter" size={10} /> {filterLabel} <Icon name={open ? 'chevronD' : 'chevronR'} size={9} />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 200, background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)', minWidth: 200, maxHeight: 380, overflowY: 'auto', padding: '6px 0' }}>
+          <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 12px', borderRadius: 0, fontSize: 11, gap: 7 }} onClick={() => { onChange(new Set()); setOpen(false); }}><Chk on={isAll} /> All types</button>
+          {types.map(t => (
+            <button key={t} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 12px', borderRadius: 0, fontSize: 11, gap: 7 }} onClick={() => toggle(t)}>
+              <Chk on={selectedTypes.has(t)} />
+              <IssueTypeBadge type={t} small />
+              <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', marginLeft: 'auto' }}>{issues.filter(i => i.type === t).length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Jira view ───────────────────────────────────────────────────────────
 
 function JiraView({ state, onOpenProject }) {
   const jiraProjects = state.jiraProjects || [];
   const allSprints = state.sprints || [];
   const allIssues = state.jiraIssues || [];
   const boardColumns = state.jiraBoardColumns || [];
+  const boardColumnsByProject = state.jiraBoardColumnsByProject || {};
   const savedScopes = state.meta.integrations?.jira?.selectedScopes || [];
+  const savedTypeFilters = state.meta.integrations?.jira?.typeFilters || {};
   const [selectedProjectKeys, setSelectedProjectKeys] = React.useState(() => new Set(savedScopes));
+  const [selectedTypes, setSelectedTypes] = React.useState(() => new Set(savedTypeFilters[savedScopes.join(',') || '_all'] || []));
   const [viewMode, setViewMode] = React.useState('board');
   const [openIssue, setOpenIssue] = React.useState(null);
   const [search, setSearch] = React.useState('');
@@ -62,20 +103,45 @@ function JiraView({ state, onOpenProject }) {
   const [syncError, setSyncError] = React.useState(null);
   const [activeSprintId, setActiveSprintId] = React.useState(null);
   const [collapsedSprints, setCollapsedSprints] = React.useState(new Set());
+  const [listSort, setListSort] = React.useState({ col: 'status', asc: true });
+
+  const scopeKey = [...selectedProjectKeys].sort().join(',') || '_all';
 
   const updateProjectFilter = (nextKeys) => {
     setSelectedProjectKeys(nextKeys);
     actions.setMeta({ integrations: { ...state.meta.integrations, jira: { ...state.meta.integrations?.jira, selectedScopes: [...nextKeys] } } });
+    // Restore saved type filter for new scope
+    const nk = [...nextKeys].sort().join(',') || '_all';
+    const saved = (state.meta.integrations?.jira?.typeFilters || {})[nk] || [];
+    setSelectedTypes(new Set(saved));
+  };
+
+  const updateTypeFilter = (nextTypes) => {
+    setSelectedTypes(nextTypes);
+    const tf = { ...(state.meta.integrations?.jira?.typeFilters || {}), [scopeKey]: [...nextTypes] };
+    actions.setMeta({ integrations: { ...state.meta.integrations, jira: { ...state.meta.integrations?.jira, typeFilters: tf } } });
   };
 
   const syncJira = async () => {
     setSyncing(true); setSyncError(null);
     try {
       const projectKeys = [...selectedProjectKeys];
+      // Send active type filters so the server can narrow the JQL
+      const tfMap = state.meta.integrations?.jira?.typeFilters || {};
+      const typeFilterPayload = {};
+      projectKeys.forEach(k => {
+        const scopeKey = k; // per-project key
+        const saved = tfMap[scopeKey] || tfMap[projectKeys.join(',')] || [];
+        if (saved.length) typeFilterPayload[k] = saved;
+      });
+      // If single project or "all" with a scope key, also check the current active scope
+      if (!projectKeys.length && selectedTypes.size > 0) {
+        typeFilterPayload['_all'] = [...selectedTypes];
+      }
       const res = await fetch('/api/jira/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(projectKeys.length ? { projectKeys } : {}),
+        body: JSON.stringify({ ...(projectKeys.length ? { projectKeys } : {}), typeFilters: typeFilterPayload }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -86,14 +152,65 @@ function JiraView({ state, onOpenProject }) {
     } finally { setSyncing(false); }
   };
 
-  // Filtered issues
+  // Filtered issues — project filter, then type filter, then search
   const isAllProjects = selectedProjectKeys.size === 0;
-  const issues = allIssues.filter(i =>
+  const projectFilteredIssues = allIssues.filter(i =>
     (isAllProjects || selectedProjectKeys.has(i.projectKey)) &&
     (!search || i.summary.toLowerCase().includes(search.toLowerCase()) || i.key.toLowerCase().includes(search.toLowerCase()))
   );
+  const issues = selectedTypes.size === 0
+    ? projectFilteredIssues
+    : projectFilteredIssues.filter(i => selectedTypes.has(i.type));
 
-  // Sprint navigation — chronological, show prev/current/next in dropdown
+  // Derive board columns dynamically from selected projects
+  const derivedColumns = React.useMemo(() => {
+    const keys = isAllProjects ? Object.keys(boardColumnsByProject) : [...selectedProjectKeys];
+    // Collect columns from all selected projects
+    const colMap = new Map(); // name → Set<status>
+    let hasConfig = false;
+    keys.forEach(k => {
+      const cols = boardColumnsByProject[k];
+      if (cols && cols.length) {
+        hasConfig = true;
+        cols.forEach(c => {
+          if (!colMap.has(c.name)) colMap.set(c.name, new Set());
+          (c.statuses || []).forEach(s => colMap.get(c.name).add(s));
+        });
+      }
+    });
+    // If we have per-project config, use it
+    if (hasConfig) {
+      return [...colMap.entries()].map(([name, statuses]) => ({ name, statuses: [...statuses] }));
+    }
+    // Fallback to global boardColumns
+    if (boardColumns.length) {
+      return boardColumns.map(c => ({ name: c.name, statuses: c.statuses || [] }));
+    }
+    // Last resort: extract unique statuses from issues
+    const uniqueStatuses = [...new Set(issues.map(i => i.status))];
+    return uniqueStatuses.map(s => ({ name: s, statuses: [s] }));
+  }, [isAllProjects, selectedProjectKeys, boardColumnsByProject, boardColumns, issues.length]);
+
+  // Build status→column mapping from derived columns
+  const statusToColumn = React.useMemo(() => {
+    const map = {};
+    derivedColumns.forEach(col => {
+      (col.statuses || []).forEach(st => { map[st] = col.name; });
+    });
+    return map;
+  }, [derivedColumns]);
+
+  const columnNames = derivedColumns.map(c => c.name);
+
+  const mapToColumn = (status) => {
+    if (statusToColumn[status]) return statusToColumn[status];
+    // Fallback heuristics for unmapped statuses
+    if (/done|closed|released|ready for release|resolved/i.test(status)) return columnNames.find(c => /done|closed|released/i.test(c)) || columnNames[columnNames.length - 1] || 'Done';
+    if (/progress|development|dev|in dev/i.test(status)) return columnNames.find(c => /progress|dev/i.test(c)) || columnNames[1] || 'In Progress';
+    return columnNames[0] || 'To Do';
+  };
+
+  // Sprint navigation
   const chronoSprints = [...allSprints].sort((a, b) => (a.start || '').localeCompare(b.start || ''));
   const activeSprint = chronoSprints.find(s => s.state === 'active');
   React.useEffect(() => {
@@ -104,40 +221,15 @@ function JiraView({ state, onOpenProject }) {
   const currentIdx = chronoSprints.findIndex(s => s.id === activeSprintId);
   const prevSprint = currentIdx > 0 ? chronoSprints[currentIdx - 1] : null;
   const nextSprint = currentIdx >= 0 && currentIdx < chronoSprints.length - 1 ? chronoSprints[currentIdx + 1] : null;
-
-  // Dropdown options: prev + current + next (deduped, only existing)
-  const sprintDropdownOptions = [prevSprint, currentSprint, nextSprint].filter(Boolean);
-  // Dedupe by ID
   const seenIds = new Set();
-  const uniqueSprintOptions = sprintDropdownOptions.filter(s => { if (seenIds.has(s.id)) return false; seenIds.add(s.id); return true; });
+  const uniqueSprintOptions = [prevSprint, currentSprint, nextSprint].filter(Boolean).filter(s => { if (seenIds.has(s.id)) return false; seenIds.add(s.id); return true; });
 
-  // Issues for current sprint board view
   const sprintIssues = currentSprint ? issues.filter(i => i.sprintId === currentSprint.id) : [];
-
-  // Build column→status mapping from board config
-  const statusToColumn = {};
-  if (boardColumns.length) {
-    boardColumns.forEach(col => {
-      (col.statuses || []).forEach(st => { statusToColumn[st] = col.name; });
-    });
-  }
-
-  // Map issues to fixed board columns
-  const mapToColumn = (status) => {
-    // First check board config mapping
-    const mapped = statusToColumn[status];
-    if (mapped && BOARD_COLUMNS.includes(mapped)) return mapped;
-    // Fallback heuristics
-    if (/done|closed|released|ready for release|resolved/i.test(status)) return 'Done';
-    if (/qa|testing|regression/i.test(status)) return BOARD_COLUMNS.includes('In QA') ? 'In QA' : 'Ready for QA';
-    if (/review/i.test(status)) return 'In Review';
-    if (/progress|development|dev|in dev/i.test(status)) return 'In Progress';
-    return 'To Do';
-  };
 
   // Sprint stats
   const totalPts = sprintIssues.reduce((a, b) => a + (b.storyPoints || 0), 0);
-  const donePts = sprintIssues.filter(i => mapToColumn(i.status) === 'Done').reduce((a, b) => a + (b.storyPoints || 0), 0);
+  const doneCol = columnNames[columnNames.length - 1] || 'Done';
+  const donePts = sprintIssues.filter(i => mapToColumn(i.status) === doneCol).reduce((a, b) => a + (b.storyPoints || 0), 0);
   const sprintDays = currentSprint ? daysBetween(currentSprint.start, currentSprint.end) : 14;
   const sprintElapsed = currentSprint ? Math.max(0, Math.min(sprintDays, daysBetween(currentSprint.start, new Date().toISOString().slice(0, 10)))) : 0;
   const timePct = sprintDays > 0 ? Math.round((sprintElapsed / sprintDays) * 100) : 0;
@@ -146,21 +238,51 @@ function JiraView({ state, onOpenProject }) {
   // Backlog groups
   const backlogGroups = (() => {
     const groups = [];
-    // Show active sprint first, then future sprints, then backlog
     const activeAndFuture = chronoSprints.filter(s => s.state === 'active' || s.state === 'future');
     activeAndFuture.forEach(sp => {
       const spIssues = issues.filter(i => i.sprintId === sp.id);
       groups.push({ sprint: sp, issues: spIssues });
     });
     const backlogIssues = issues.filter(i => !i.sprintId);
-    if (backlogIssues.length) {
-      groups.push({ sprint: null, issues: backlogIssues });
-    }
+    if (backlogIssues.length) groups.push({ sprint: null, issues: backlogIssues });
     return groups;
   })();
 
   const toggleCollapse = (key) => {
     setCollapsedSprints(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  };
+
+  // List view sorting
+  const sortedListIssues = React.useMemo(() => {
+    const colOrder = {};
+    columnNames.forEach((c, i) => { colOrder[c] = i; });
+    const prioOrder = { Highest: 0, High: 1, Medium: 2, Low: 3, Lowest: 4 };
+    const sorted = [...issues];
+    sorted.sort((a, b) => {
+      let cmp = 0;
+      switch (listSort.col) {
+        case 'key': cmp = a.key.localeCompare(b.key); break;
+        case 'type': cmp = a.type.localeCompare(b.type); break;
+        case 'summary': cmp = a.summary.localeCompare(b.summary); break;
+        case 'status': {
+          const ai = colOrder[mapToColumn(a.status)] ?? 999;
+          const bi = colOrder[mapToColumn(b.status)] ?? 999;
+          cmp = ai - bi;
+          break;
+        }
+        case 'priority': cmp = (prioOrder[a.priority] ?? 5) - (prioOrder[b.priority] ?? 5); break;
+        case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
+        case 'sprint': cmp = (a.sprintName || '').localeCompare(b.sprintName || ''); break;
+        case 'points': cmp = (b.storyPoints || 0) - (a.storyPoints || 0); break;
+        default: cmp = 0;
+      }
+      return listSort.asc ? cmp : -cmp;
+    });
+    return sorted;
+  }, [issues, listSort, columnNames]);
+
+  const toggleSort = (col) => {
+    setListSort(prev => prev.col === col ? { col, asc: !prev.asc } : { col, asc: true });
   };
 
   // Empty state
@@ -176,6 +298,8 @@ function JiraView({ state, onOpenProject }) {
     );
   }
 
+  const viewTitles = { board: 'Sprint board', backlog: 'Backlog', list: 'Issues' };
+
   return (
     <div className="content-narrow">
       {/* Header */}
@@ -187,13 +311,14 @@ function JiraView({ state, onOpenProject }) {
               {state.meta.integrations?.jira?.site} · synced {fmtRelative(state.meta.integrations?.jira?.syncedAt)}
             </span>
           </div>
-          <div className="title-h1">{viewMode === 'backlog' ? 'Backlog' : 'Sprint board'}</div>
+          <div className="title-h1">{viewTitles[viewMode] || 'Jira'}</div>
           <div className="title-sub">Read-only · view your team's work without leaving Operator</div>
         </div>
         <div className="row-flex" style={{ gap: 8 }}>
           <div className="seg">
             <button className={`seg-btn ${viewMode === 'board' ? 'active' : ''}`} onClick={() => setViewMode('board')}>Board</button>
             <button className={`seg-btn ${viewMode === 'backlog' ? 'active' : ''}`} onClick={() => setViewMode('backlog')}>Backlog</button>
+            <button className={`seg-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}>List</button>
           </div>
           <button className="btn btn-sm" onClick={syncJira} disabled={syncing} title="Pull latest data from Jira">
             {syncing ? '…' : <><Icon name="download" size={11} /> Sync</>}
@@ -205,6 +330,7 @@ function JiraView({ state, onOpenProject }) {
       {/* Filters */}
       <div className="row-flex" style={{ marginBottom: 14, gap: 8 }}>
         <JiraProjectFilter jiraProjects={jiraProjects} allIssues={allIssues} selectedKeys={selectedProjectKeys} onChange={updateProjectFilter} />
+        <JiraTypeFilter issues={projectFilteredIssues} selectedTypes={selectedTypes} onChange={updateTypeFilter} />
         <input className="input" style={{ padding: '4px 8px', fontSize: 12, width: 200 }} placeholder="Search issues…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>
           {viewMode === 'board' ? `${sprintIssues.length} in sprint` : `${issues.length} issue${issues.length !== 1 ? 's' : ''}`}
@@ -261,10 +387,10 @@ function JiraView({ state, onOpenProject }) {
             </div>
           )}
 
-          {/* Kanban columns — only show columns that have issues */}
+          {/* Kanban columns — dynamic from Jira board config */}
           {(() => {
-            const visibleCols = BOARD_COLUMNS.filter(colName => sprintIssues.some(i => mapToColumn(i.status) === colName));
-            const cols = visibleCols.length > 0 ? visibleCols : BOARD_COLUMNS;
+            const visibleCols = columnNames.filter(colName => sprintIssues.some(i => mapToColumn(i.status) === colName));
+            const cols = visibleCols.length > 0 ? visibleCols : columnNames;
             return (
           <div className="jira-board" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))` }}>
             {cols.map(colName => {
@@ -296,7 +422,6 @@ function JiraView({ state, onOpenProject }) {
             const pts = grpIssues.reduce((a, b) => a + (b.storyPoints || 0), 0);
             return (
               <div key={key} className="card" style={{ overflow: 'hidden' }}>
-                {/* Sprint header */}
                 <div className="card-head" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCollapse(key)}>
                   <div className="row-flex" style={{ gap: 8 }}>
                     <Icon name={isCollapsed ? 'chevronR' : 'chevronD'} size={10} />
@@ -310,13 +435,14 @@ function JiraView({ state, onOpenProject }) {
                     {pts > 0 && <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>Est: {pts}</span>}
                   </div>
                 </div>
-                {/* Issue rows */}
                 {!isCollapsed && grpIssues.length > 0 && (
                   <div>
                     {[...grpIssues].sort((a, b) => {
-                      const ORDER = ['To Do', 'In Progress', 'In Review', 'Ready for QA', 'In QA', 'Prod Review', 'Released', 'Closed'];
-                      const ai = ORDER.indexOf(a.status), bi = ORDER.indexOf(b.status);
-                      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+                      const colOrder = {};
+                      columnNames.forEach((c, i) => { colOrder[c] = i; });
+                      const ai = colOrder[mapToColumn(a.status)] ?? 999;
+                      const bi = colOrder[mapToColumn(b.status)] ?? 999;
+                      return ai - bi;
                     }).map(iss => (
                       <div key={iss.id} className="jira-backlog-row" onClick={() => setOpenIssue(iss.id)}>
                         <IssueTypeBadge type={iss.type} small />
@@ -340,6 +466,55 @@ function JiraView({ state, onOpenProject }) {
             );
           })}
           {backlogGroups.length === 0 && <EmptyState title="No issues" body="Try adjusting the project filter or syncing." />}
+        </div>
+      )}
+
+      {/* ── LIST VIEW ── */}
+      {viewMode === 'list' && (
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--line)' }}>
+                  {[
+                    { key: 'key', label: 'Key', width: 80 },
+                    { key: 'type', label: 'Type', width: 80 },
+                    { key: 'summary', label: 'Summary' },
+                    { key: 'status', label: 'Status', width: 120 },
+                    { key: 'priority', label: 'Pri', width: 40 },
+                    { key: 'assignee', label: 'Assignee', width: 120 },
+                    { key: 'sprint', label: 'Sprint', width: 140 },
+                    { key: 'points', label: 'Pts', width: 40 },
+                  ].map(col => (
+                    <th key={col.key} style={{ padding: '8px 10px', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', width: col.width || 'auto' }}
+                      onClick={() => toggleSort(col.key)}>
+                      {col.label} {listSort.col === col.key ? (listSort.asc ? '↑' : '↓') : ''}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedListIssues.map(iss => (
+                  <tr key={iss.id} style={{ borderBottom: '1px solid var(--line-2)', cursor: 'pointer' }}
+                    onClick={() => setOpenIssue(iss.id)}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={{ padding: '7px 10px' }}><span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{iss.key}</span></td>
+                    <td style={{ padding: '7px 10px' }}><IssueTypeBadge type={iss.type} small /></td>
+                    <td style={{ padding: '7px 10px', fontWeight: 500, maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{iss.summary}</td>
+                    <td style={{ padding: '7px 10px' }}><JiraStatusBadge status={iss.status} /></td>
+                    <td style={{ padding: '7px 10px' }}><JiraPriorityDot priority={iss.priority} /></td>
+                    <td style={{ padding: '7px 10px' }}><div className="row-flex" style={{ gap: 5 }}><JiraAvatar name={iss.assignee} size={18} /><span className="truncate" style={{ fontSize: 11.5, maxWidth: 90 }}>{iss.assignee}</span></div></td>
+                    <td style={{ padding: '7px 10px' }}><span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{iss.sprintName || '—'}</span></td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right' }}><span className="mono" style={{ fontSize: 11 }}>{iss.storyPoints || '–'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {sortedListIssues.length === 0 && (
+              <div style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--fg-4)', fontSize: 12 }}>No issues match the current filters.</div>
+            )}
+          </div>
         </div>
       )}
 
@@ -522,4 +697,4 @@ function JiraAvatar({ name, size = 20 }) {
   return <span style={{ width: size, height: size, borderRadius: '50%', display: 'inline-grid', placeItems: 'center', background: `oklch(65% 0.08 ${hue})`, color: 'white', fontSize: size * 0.45, fontWeight: 600, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{initials}</span>;
 }
 
-Object.assign(window, { JiraView, JiraProjectFilter, IssueCard, IssueDrawer, IssueTypeBadge, JiraStatusBadge, JiraPriorityDot, JiraAvatar });
+Object.assign(window, { JiraView, JiraProjectFilter, JiraTypeFilter, IssueCard, IssueDrawer, IssueTypeBadge, JiraStatusBadge, JiraPriorityDot, JiraAvatar });

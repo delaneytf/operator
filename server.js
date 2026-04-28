@@ -94,10 +94,11 @@ app.get('/api/auth/status', (req, res) => {
     if (t?.user)     status[p].user  = t.user;
   });
 
-  // Also check env fallbacks for Jira / Confluence / Claude
+  // Also check env fallbacks for Jira / Confluence / AI providers
   if (!status.jira.connected && env.JIRA_API_TOKEN)        status.jira        = { connected: true, source: 'env' };
   if (!status.confluence.connected && env.CONFLUENCE_API_TOKEN) status.confluence = { connected: true, source: 'env' };
   if (!status.claude.connected && env.ANTHROPIC_API_KEY)   status.claude      = { connected: true, source: 'env' };
+  if (!status.openai.connected && env.OPENAI_API_KEY)      status.openai      = { connected: true, source: 'env' };
   if (!status.gemini.connected && env.GEMINI_API_KEY)      status.gemini      = { connected: true, source: 'env' };
 
   res.json(status);
@@ -624,7 +625,18 @@ app.post('/api/jira/sync', async (req, res) => {
   }
   const { headers, base } = jiraAuth;
   const projectKeys = Array.isArray(req.body?.projectKeys) ? req.body.projectKeys.filter(k => /^[A-Z0-9_]+$/i.test(k)) : [];
-  const projectJql = projectKeys.length ? `project in (${projectKeys.join(', ')}) AND ` : '';
+  const typeFilters = req.body?.typeFilters || {};
+  const projectJql = projectKeys.length ? `project in (${projectKeys.join(', ')})` : '';
+  // Build issue type JQL clause from type filters
+  // Collect all unique type names across selected projects
+  const allFilteredTypes = new Set();
+  Object.values(typeFilters).forEach(types => {
+    if (Array.isArray(types)) types.forEach(t => allFilteredTypes.add(t));
+  });
+  const typeJql = allFilteredTypes.size ? `issuetype in (${[...allFilteredTypes].map(t => `"${t}"`).join(', ')})` : '';
+  const dateJql = allFilteredTypes.size ? '' : 'updated >= -90d';
+  const whereClauses = [projectJql, typeJql, dateJql].filter(Boolean).join(' AND ');
+  const fullJql = `${whereClauses} order by updated DESC`;
 
   try {
     // Fetch projects — try v3 (Cloud) then fall back to v2 (Server/DC)
@@ -643,9 +655,17 @@ app.post('/api/jira/sync', async (req, res) => {
       boardId: `b-${p.id}`,
     }));
 
+    // Extract issue types per project from project data
+    const issueTypesByProject = {};
+    projList.forEach((p) => {
+      if (p.issueTypes || p.issuetypes) {
+        issueTypesByProject[p.key] = (p.issueTypes || p.issuetypes).map(t => t.name).filter(n => !n.startsWith('Sub-task'));
+      }
+    });
+
     // Fetch issues ordered by updated — scoped to selected projects if any
     const isCloud = base.includes('atlassian.net') || base.includes('api.atlassian.com');
-    const maxPages = projectKeys.length ? 10 : 5;
+    const maxPages = allFilteredTypes.size ? 20 : (projectKeys.length ? 10 : 5);
     let allIssuesRaw = [];
     if (isCloud) {
       // Cloud: use POST /rest/api/3/search/jql with cursor pagination
@@ -653,7 +673,7 @@ app.post('/api/jira/sync', async (req, res) => {
       const searchFields = ['summary', 'status', 'priority', 'assignee', 'reporter', 'issuetype', 'customfield_10016', 'customfield_10020', 'customfield_10026', 'labels', 'description', 'updated', 'project', 'parent'];
       for (let page = 0; page < maxPages; page++) {
         const body = {
-          jql: `${projectJql}updated >= -90d order by updated DESC`,
+          jql: fullJql,
           maxResults: 100,
           fields: searchFields,
         };
@@ -671,7 +691,7 @@ app.post('/api/jira/sync', async (req, res) => {
       }
     } else {
       // Server/Data Center: use GET /rest/api/2/search
-      const v2Jql = encodeURIComponent(`${projectJql}order by updated DESC`);
+      const v2Jql = encodeURIComponent(fullJql);
       const issuesRes = await fetch(
         `${base}/rest/api/2/search?jql=${v2Jql}&maxResults=200&fields=summary,status,priority,assignee,reporter,issuetype,customfield_10016,customfield_10020,customfield_10026,labels,description,updated,project,parent`,
         { headers }
@@ -734,6 +754,7 @@ app.post('/api/jira/sync', async (req, res) => {
 
     // Fetch board column config from scrum boards for selected projects
     let boardColumns = [];
+    const boardColumnsByProject = {};
     const boardsRes = await fetch(`${base}/rest/agile/1.0/board?maxResults=50&type=scrum`, { headers });
     if (boardsRes.ok) {
       const boardsData = await boardsRes.json();
@@ -774,31 +795,40 @@ app.post('/api/jira/sync', async (req, res) => {
         else { const existing = sprintMap.get(parseInt(s.id.replace('sp-', ''))); if (!existing.boardId) existing.boardId = s.boardId; }
       });
 
-      // Fetch column config from the first relevant scrum board
+      // Fetch column config from ALL relevant boards, keyed by project
       if (relevantBoards.length) {
+        // Fetch all statuses once for ID→name mapping
+        let statusMap = {};
         try {
-          const cfgRes = await fetch(`${base}/rest/agile/1.0/board/${relevantBoards[0].id}/configuration`, { headers });
-          if (cfgRes.ok) {
+          const statusRes = await fetch(`${base}/rest/api/3/status`, { headers });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            statusData.forEach((s) => { statusMap[s.id] = s.name; });
+          }
+        } catch (e) { console.error('[jira] status fetch error:', e.message); }
+
+        const configFetches = relevantBoards.slice(0, 10).map(async (b) => {
+          try {
+            const cfgRes = await fetch(`${base}/rest/agile/1.0/board/${b.id}/configuration`, { headers });
+            if (!cfgRes.ok) return;
             const cfgData = await cfgRes.json();
-            // Also fetch all statuses to map status IDs to names
-            const statusRes = await fetch(`${base}/rest/api/3/status`, { headers });
-            const statusMap = {};
-            if (statusRes.ok) {
-              const statusData = await statusRes.json();
-              statusData.forEach((s) => { statusMap[s.id] = s.name; });
-            }
-            boardColumns = (cfgData.columnConfig?.columns || []).map((col) => ({
+            const cols = (cfgData.columnConfig?.columns || []).map((col) => ({
               name: col.name,
               statuses: (col.statuses || []).map(s => statusMap[s.id] || s.id),
             }));
-          }
-        } catch (e) { console.error('[jira] board config error:', e.message); }
+            const projKey = b.location?.projectKey;
+            if (projKey) boardColumnsByProject[projKey] = cols;
+            // Keep first board config as the global fallback
+            if (!boardColumns.length) boardColumns = cols;
+          } catch (e) { console.error(`[jira] board ${b.id} config error:`, e.message); }
+        });
+        await Promise.all(configFetches);
       }
     }
 
     const sprints = [...sprintMap.values()];
 
-    res.json({ jiraProjects, jiraIssues, sprints, boardColumns });
+    res.json({ jiraProjects, jiraIssues, sprints, boardColumns, boardColumnsByProject, issueTypesByProject });
   } catch (e) {
     console.error('[jira] sync error:', e.message);
     res.status(500).json({ error: e.message });
@@ -1043,6 +1073,18 @@ app.post('/api/ai/chat', async (req, res) => {
   try {
     if (provider === 'openai') {
       if (!openaiKey) return res.status(400).json({ error: 'OpenAI API key not configured.' });
+      // Transform multimodal content blocks for OpenAI vision format
+      const oaiMessages = messages.map(m => {
+        if (Array.isArray(m.content)) {
+          return { role: m.role, content: m.content.map(block => {
+            if (block.type === 'image') {
+              return { type: 'image_url', image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` } };
+            }
+            return block; // text blocks pass through
+          }) };
+        }
+        return m;
+      });
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
@@ -1050,7 +1092,7 @@ app.post('/api/ai/chat', async (req, res) => {
           model: openaiToken?.model || process.env.OPENAI_MODEL || 'gpt-4o',
           messages: [
             { role: 'system', content: system || 'You are a helpful project management assistant.' },
-            ...messages,
+            ...oaiMessages,
           ],
           max_tokens: 1024,
         }),
@@ -1068,10 +1110,19 @@ app.post('/api/ai/chat', async (req, res) => {
         contents.push({ role: 'user', parts: [{ text: system }] });
         contents.push({ role: 'model', parts: [{ text: 'Understood.' }] });
       }
-      messages.forEach((m) => contents.push({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      }));
+      messages.forEach((m) => {
+        if (Array.isArray(m.content)) {
+          const parts = m.content.map(block => {
+            if (block.type === 'image') {
+              return { inline_data: { mime_type: block.source.media_type, data: block.source.data } };
+            }
+            return { text: block.text };
+          });
+          contents.push({ role: m.role === 'assistant' ? 'model' : 'user', parts });
+        } else {
+          contents.push({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] });
+        }
+      });
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }

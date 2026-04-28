@@ -630,34 +630,156 @@ function renderMarkdown(text) {
   if (!text) return null;
   const lines = text.split('\n');
   const elements = [];
-  let inList = false;
-  let listItems = [];
-  const flushList = () => { if (listItems.length) { elements.push(<ul key={`ul-${elements.length}`} style={{ margin: '4px 0', paddingLeft: 18 }}>{listItems}</ul>); listItems = []; } inList = false; };
+  let i = 0;
+
+  // Inline formatting: bold, italic, inline code, links
   const renderInline = (s) => {
     const parts = [];
     let last = 0;
-    const re = /\*\*(.+?)\*\*/g;
+    // Match: inline code, bold, italic, links
+    const re = /(`[^`]+`)|(\*\*\*(.+?)\*\*\*)|(\*\*(.+?)\*\*)|(\*(.+?)\*)|(_(.+?)_)|(\[([^\]]+)\]\(([^)]+)\))/g;
     let m;
     while ((m = re.exec(s)) !== null) {
       if (m.index > last) parts.push(s.slice(last, m.index));
-      parts.push(<strong key={m.index}>{m[1]}</strong>);
+      if (m[1]) parts.push(<code key={m.index} className="md-inline-code">{m[1].slice(1, -1)}</code>);
+      else if (m[2]) parts.push(<strong key={m.index}><em>{m[3]}</em></strong>);
+      else if (m[4]) parts.push(<strong key={m.index}>{m[5]}</strong>);
+      else if (m[6]) parts.push(<em key={m.index}>{m[7]}</em>);
+      else if (m[8]) parts.push(<em key={m.index}>{m[9]}</em>);
+      else if (m[10]) parts.push(<a key={m.index} href={m[12]} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{m[11]}</a>);
       last = re.lastIndex;
     }
     if (last < s.length) parts.push(s.slice(last));
     return parts.length ? parts : s;
   };
-  lines.forEach((line, i) => {
+
+  while (i < lines.length) {
+    const line = lines[i];
     const trimmed = line.trim();
-    if (/^[-•]\s+/.test(trimmed)) {
-      if (!inList) { flushList(); inList = true; }
-      listItems.push(<li key={i} style={{ fontSize: 13, lineHeight: 1.5 }}>{renderInline(trimmed.replace(/^[-•]\s+/, ''))}</li>);
-    } else {
-      flushList();
-      if (trimmed === '') { elements.push(<br key={i} />); }
-      else { elements.push(<div key={i} style={{ marginBottom: 2 }}>{renderInline(trimmed)}</div>); }
+
+    // Code block (fenced)
+    if (/^```/.test(trimmed)) {
+      const lang = trimmed.slice(3).trim();
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i].trim())) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      elements.push(
+        <pre key={elements.length} className="md-code-block">
+          {lang && <div className="md-code-lang">{lang}</div>}
+          <code>{codeLines.join('\n')}</code>
+        </pre>
+      );
+      continue;
     }
-  });
-  flushList();
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      elements.push(<hr key={elements.length} className="md-hr" />);
+      i++;
+      continue;
+    }
+
+    // Headers
+    const hMatch = trimmed.match(/^(#{1,6})\s+(.+)/);
+    if (hMatch) {
+      const level = hMatch[1].length;
+      const sizes = { 1: 18, 2: 15.5, 3: 14, 4: 13, 5: 12.5, 6: 12 };
+      elements.push(
+        <div key={elements.length} className="md-heading" style={{ fontSize: sizes[level], fontWeight: 600, marginTop: level <= 2 ? 14 : 8, marginBottom: 4 }}>
+          {renderInline(hMatch[2])}
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Table (detect header row with pipes)
+    if (/^\|(.+)\|$/.test(trimmed) && i + 1 < lines.length && /^\|[-\s:|]+\|$/.test(lines[i + 1]?.trim())) {
+      const parseRow = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const headers = parseRow(trimmed);
+      // Parse alignment from separator row
+      const sepCells = parseRow(lines[i + 1]);
+      const aligns = sepCells.map(c => /^:-+:$/.test(c) ? 'center' : /^-+:$/.test(c) ? 'right' : 'left');
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\|(.+)\|$/.test(lines[i]?.trim())) {
+        rows.push(parseRow(lines[i]));
+        i++;
+      }
+      elements.push(
+        <div key={elements.length} className="md-table-wrap">
+          <table className="md-table">
+            <thead>
+              <tr>{headers.map((h, hi) => <th key={hi} style={{ textAlign: aligns[hi] || 'left' }}>{renderInline(h)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri}>{row.map((cell, ci) => <td key={ci} style={{ textAlign: aligns[ci] || 'left' }}>{renderInline(cell)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // Blockquote
+    if (/^>\s?/.test(trimmed)) {
+      const quoteLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i]?.trim())) {
+        quoteLines.push(lines[i].trim().replace(/^>\s?/, ''));
+        i++;
+      }
+      elements.push(
+        <blockquote key={elements.length} className="md-blockquote">
+          {quoteLines.map((ql, qi) => <div key={qi}>{renderInline(ql)}</div>)}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // Ordered list
+    if (/^\d+[.)]\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i]?.trim())) {
+        items.push(lines[i].trim().replace(/^\d+[.)]\s+/, ''));
+        i++;
+      }
+      elements.push(
+        <ol key={elements.length} className="md-list">{items.map((item, li) => <li key={li}>{renderInline(item)}</li>)}</ol>
+      );
+      continue;
+    }
+
+    // Unordered list
+    if (/^[-•*]\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^[-•*]\s+/.test(lines[i]?.trim())) {
+        items.push(lines[i].trim().replace(/^[-•*]\s+/, ''));
+        i++;
+      }
+      elements.push(
+        <ul key={elements.length} className="md-list">{items.map((item, li) => <li key={li}>{renderInline(item)}</li>)}</ul>
+      );
+      continue;
+    }
+
+    // Empty line
+    if (trimmed === '') {
+      elements.push(<div key={elements.length} className="md-spacer" />);
+      i++;
+      continue;
+    }
+
+    // Normal paragraph
+    elements.push(<div key={elements.length} className="md-paragraph">{renderInline(trimmed)}</div>);
+    i++;
+  }
+
   return elements;
 }
 
@@ -786,39 +908,56 @@ function Assistant({ state }) {
     const MAX_FILES = 5;
     const files = Array.from(e.target.files);
     const newFiles = [];
+    const readFile = (file, mode) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      if (mode === 'dataURL') reader.readAsDataURL(file);
+      else reader.readAsText(file);
+    });
     for (const file of files.slice(0, MAX_FILES - attachedFiles.length)) {
       if (file.size > MAX_SIZE) continue;
-      let content;
-      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const resp = await fetch('/api/parse-xlsx', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: arrayBuffer });
-          if (!resp.ok) throw new Error('Parse failed');
-          const sheets = await resp.json();
-          content = JSON.stringify(sheets, null, 2);
-        } catch (err) {
-          console.error('[assistant] XLSX parse error:', err);
-          content = '[Error: Could not parse XLSX file]';
-        }
-      } else if (file.name.endsWith('.pdf') && window.pdfjsLib) {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-          const pages = [];
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            pages.push(textContent.items.map(item => item.str).join(' '));
+      try {
+        let content;
+        const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const resp = await fetch('/api/parse-xlsx', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: arrayBuffer });
+            if (!resp.ok) throw new Error('Parse failed');
+            const sheets = await resp.json();
+            content = JSON.stringify(sheets, null, 2);
+          } catch (err) {
+            console.error('[assistant] XLSX parse error:', err);
+            content = '[Error: Could not parse XLSX file]';
           }
-          content = pages.join('\n\n');
-        } catch (err) {
-          console.error('[assistant] PDF parse error:', err);
-          content = '[Error: Could not extract text from PDF]';
+        } else if (file.name.endsWith('.pdf') && window.pdfjsLib) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const pages = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const textContent = await page.getTextContent();
+              pages.push(textContent.items.map(item => item.str).join(' '));
+            }
+            content = pages.join('\n\n');
+          } catch (err) {
+            console.error('[assistant] PDF parse error:', err);
+            content = '[Error: Could not extract text from PDF]';
+          }
+        } else if (isImage) {
+          const dataUrl = await readFile(file, 'dataURL');
+          const mediaType = file.type || ('image/' + file.name.split('.').pop().replace('jpg', 'jpeg'));
+          newFiles.push({ name: file.name, size: file.size, content: dataUrl, isImage: true, mediaType, dataUrl });
+          continue;
+        } else {
+          content = await readFile(file, 'text');
         }
-      } else {
-        content = await new Promise(r => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.readAsText(file); });
+        newFiles.push({ name: file.name, size: file.size, content });
+      } catch (err) {
+        console.error('[assistant] File read error:', file.name, err);
       }
-      newFiles.push({ name: file.name, size: file.size, content });
     }
     setAttachedFiles(prev => [...prev, ...newFiles].slice(0, MAX_FILES));
     e.target.value = '';
@@ -920,7 +1059,8 @@ function Assistant({ state }) {
     const q = input.trim();
     const filesToSend = [...attachedFiles];
     const fileNames = filesToSend.map(f => f.name);
-    actions.appendChatMessage(tid, { role: 'user', text: q || `[Attached ${fileNames.length} file${fileNames.length > 1 ? 's' : ''}]`, attachedFiles: fileNames.length > 0 ? fileNames : undefined });
+    const imageDataUrls = filesToSend.filter(f => f.isImage).map(f => ({ name: f.name, dataUrl: f.dataUrl }));
+    actions.appendChatMessage(tid, { role: 'user', text: q || `[Attached ${fileNames.length} file${fileNames.length > 1 ? 's' : ''}]`, attachedFiles: fileNames.length > 0 ? fileNames : undefined, attachedImages: imageDataUrls.length > 0 ? imageDataUrls : undefined });
     setInput(''); setSlashOpen(false); setBusy(true); setAttachedFiles([]);
     if (inputRef.current) { inputRef.current.style.height = 'auto'; }
 
@@ -949,10 +1089,12 @@ function Assistant({ state }) {
     const threadMsgs = (thread?.messages || []).slice(-(HISTORY_DEPTH));
     const historyMessages = threadMsgs.map(m => ({ role: m.role, content: m.text || '' }));
 
-    // Build file context
+    // Build file context (text files only; images go as content blocks)
+    const textFiles = filesToSend.filter(f => !f.isImage);
+    const imageFiles = filesToSend.filter(f => f.isImage);
     let fileContext = '';
-    if (filesToSend.length > 0) {
-      fileContext = '\nATTACHED FILES:\n' + filesToSend.map(f => {
+    if (textFiles.length > 0) {
+      fileContext = '\nATTACHED FILES:\n' + textFiles.map(f => {
         let content = f.content;
         if (f.name.endsWith('.csv')) {
           try { content = JSON.stringify(parseCSV(f.content), null, 2); } catch { /* use raw */ }
@@ -983,7 +1125,18 @@ After importing, confirm what was created vs updated with a summary.\n\n` : '';
 
     try {
       const provider = state.meta.defaultAI || null;
-      let currentMessages = [...historyMessages, { role: 'user', content: blob }];
+      let currentMessages = [...historyMessages];
+      // Build user message: multimodal array when images are attached, plain string otherwise
+      if (imageFiles.length > 0) {
+        const contentBlocks = [{ type: 'text', text: blob }];
+        for (const img of imageFiles) {
+          const base64Data = img.dataUrl.replace(/^data:[^;]+;base64,/, '');
+          contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: base64Data } });
+        }
+        currentMessages.push({ role: 'user', content: contentBlocks });
+      } else {
+        currentMessages.push({ role: 'user', content: blob });
+      }
       let allActionsApplied = [];
       let finalText = '';
       let maxRounds = filesToSend.length > 0 ? 8 : 3;
@@ -1235,16 +1388,23 @@ After importing, confirm what was created vs updated with a summary.\n\n` : '';
                 ))}
               </div>
             )}
-            <input ref={fileInputRef} type="file" accept=".txt,.csv,.json,.md,.pdf,.xlsx,.xls" multiple
+            <input ref={fileInputRef} type="file" accept=".txt,.csv,.json,.md,.pdf,.xlsx,.xls,.png,.jpg,.jpeg,.gif,.webp" multiple
               style={{ display: 'none' }} onChange={handleFileSelect} />
             <form className="chat-input-row" onSubmit={(e) => { e.preventDefault(); send(); }} style={{ flexWrap: 'wrap' }}>
               {attachedFiles.length > 0 && (
                 <div className="file-chips">
                   {attachedFiles.map((f, i) => (
-                    <span key={i} className="file-chip">
-                      <Icon name="doc" size={10} /> {f.name} ({(f.size / 1024).toFixed(1)}KB)
-                      <button type="button" className="icon-btn" onClick={() => setAttachedFiles(a => a.filter((_, j) => j !== i))}><Icon name="x" size={9} /></button>
-                    </span>
+                    f.isImage ? (
+                      <span key={i} className="file-chip" style={{ padding: 2 }}>
+                        <img src={f.dataUrl} alt={f.name} style={{ maxWidth: 60, maxHeight: 48, borderRadius: 4, verticalAlign: 'middle' }} />
+                        <button type="button" className="icon-btn" onClick={() => setAttachedFiles(a => a.filter((_, j) => j !== i))}><Icon name="x" size={9} /></button>
+                      </span>
+                    ) : (
+                      <span key={i} className="file-chip">
+                        <Icon name="doc" size={10} /> {f.name} ({(f.size / 1024).toFixed(1)}KB)
+                        <button type="button" className="icon-btn" onClick={() => setAttachedFiles(a => a.filter((_, j) => j !== i))}><Icon name="x" size={9} /></button>
+                      </span>
+                    )
                   ))}
                 </div>
               )}
@@ -1279,9 +1439,14 @@ function ChatBubble({ message, onFollowUp }) {
       ) : (
         <div className="chat-text">{isUser ? message.text : renderMarkdown(message.text)}</div>
       )}
+      {isUser && message.attachedImages?.length > 0 && (
+        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {message.attachedImages.map((img, i) => <img key={i} src={img.dataUrl} alt={img.name} title={img.name} style={{ maxWidth: 200, maxHeight: 160, borderRadius: 6, border: '1px solid var(--border)' }} />)}
+        </div>
+      )}
       {isUser && message.attachedFiles?.length > 0 && (
         <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {message.attachedFiles.map((name, i) => <span key={i} className="file-chip"><Icon name="doc" size={10} /> {name}</span>)}
+          {message.attachedFiles.filter(name => !(message.attachedImages || []).some(img => img.name === name)).map((name, i) => <span key={i} className="file-chip"><Icon name="doc" size={10} /> {name}</span>)}
         </div>
       )}
       {message.toolCalls?.length > 0 && (
